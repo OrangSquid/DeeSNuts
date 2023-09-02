@@ -1,3 +1,5 @@
+use crate::alu;
+
 // CPU modes
 const USER_MODE: u8 = 0x10;
 const FIQ_MODE: u8 = 0x11;
@@ -57,6 +59,7 @@ impl Arm7 {
         arm7.registers[13] = STACK_USER_SYSTEM_START;
         arm7.irq_banked[0] = STACK_IRQ_START;
         arm7.supervisor_banked[0] = STACK_SUPERVISOR_START;
+        arm7.registers[15] = START_PC;
         arm7
     }
 
@@ -76,8 +79,8 @@ impl Arm7 {
         // ARM MODE
         else {
             let opcode = self.fetch_arm();
-            self.decode_arm(opcode);
             self.registers[15] += 4;
+            self.decode_arm(opcode);
         }
     }
 
@@ -93,12 +96,36 @@ impl Arm7 {
         0
     }
 
+    // TODO: a single data transfer opcode might be an undefinied instruction, should take care
+    // of it at a later date
     fn decode_arm(&mut self, opcode: u32) {
         if !self.check_codition(((opcode & 0xF000_0000) >> 28) as u8) {
             return;
         }
-        match opcode & 0xFFF_FFF0 {
-            0x12F_FF10 => self.branch_and_exchange(opcode & 0xF),
+        match opcode & 0xC00_0000 {
+            0x0 => {
+                if opcode & 0x12F_FF10 == 0x12F_FF10 {
+                    self.branch_and_exchange(opcode & 0xF);
+                }
+                else {
+                    alu::decode_alu();
+                }
+            },
+            0x400_0000 => (), // Single Data Transfer or Undefined
+            0x800_0000 => match opcode & 0x200_0000 {
+                0x0 => (), // Block Data Transfer
+                0x200_0000 => self.branch(opcode & 0x100_0000 == 0x100_0000, (opcode & 0xFF_FFFF) as i32),
+                _ => ()
+            }
+            0xC00_0000 => match opcode & 0x200_0000 {
+                0x0 => (), // Coprocessor Data Transfer
+                0x200_0000 => match opcode & 0x100_0000 {
+                    0x0 => (), // Coprocessor Data Operation or Register Transfer
+                    0x100_0000 => (), // Software Interrupt
+                    _ => ()
+                }
+                _ => ()
+            }
             _ => ()
         }
     }
@@ -133,5 +160,15 @@ impl Arm7 {
         let thumb_bit = register & 0x1 << 5;
         self.cpsr_register = self.cpsr_register | thumb_bit;
         self.registers[15] = self.registers[(register & 0xFFFF_FFFE) as usize];
+    }
+
+    fn branch(&mut self, link: bool, offset: i32) {
+        let correct_ofset = ((offset << 8) >> 6) + 4;
+        if link {
+            self.registers[14] = self.registers[15]
+        }
+        let mut temp_pc = self.registers[15] as i32;
+        temp_pc += correct_ofset;
+        self.registers[15] = temp_pc as u32;
     }
 }
