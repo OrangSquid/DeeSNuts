@@ -1,4 +1,4 @@
-use crate::alu;
+use crate::alu::Alu;
 
 // CPU modes
 const USER_MODE: u8 = 0x10;
@@ -18,7 +18,7 @@ const STACK_SUPERVISOR_START: u32 = 0x0300_7FE0;
 // Position of the bits in the CPSR register
 const SIGN_FLAG: u32 = 0x8000_0000;
 const ZERO_FLAG: u32 = 0x4000_0000;
-const CARRY_FLAG: u32 = 0x2000_0000;
+pub const CARRY_FLAG: u32 = 0x2000_0000;
 const OVERFLOW_FLAG: u32 = 0x1000_0000;
 const IRQ_BIT: u32 = 0x80;
 const FIQ_BIT: u32 = 0x40;
@@ -27,9 +27,9 @@ const STATE_BIT: u32 = 0x20;
 pub struct Arm7 {
     bios: [u8; 0x4000],
     rom: Vec<u8>,
-    registers: [u32; 16],
+    pub registers: [u32; 16],
     // Current Program Status Register
-    cpsr_register: u32,
+    pub cpsr_register: u32,
     // Each u32 is a banked spsr (Saved Program Status Register)
     saved_psr: [u32; 5],
     // The banked out registers when switched out of user/system mode
@@ -80,7 +80,7 @@ impl Arm7 {
         else {
             let opcode = self.fetch_arm();
             self.registers[15] += 4;
-            self.decode_arm(opcode);
+            self.decode_arm(0xE38C_C000);
         }
     }
 
@@ -108,7 +108,7 @@ impl Arm7 {
                     self.branch_and_exchange(opcode & 0xF);
                 }
                 else {
-                    alu::decode_alu();
+                    self.alu_command(opcode & 0x3FF_FFFF);
                 }
             },
             0x400_0000 => (), // Single Data Transfer or Undefined
@@ -171,4 +171,6 @@ impl Arm7 {
         temp_pc += correct_ofset;
         self.registers[15] = temp_pc as u32;
     }
+
+    
 }

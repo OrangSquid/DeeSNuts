@@ -3,7 +3,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
 pub mod arm7;
-mod alu;
+pub mod alu;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
