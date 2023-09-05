@@ -7,7 +7,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}\\target\\debug\\DeeSNuts.exe",
-            "args": ["${workspaceFolder}\\bios\\BIOSGBA.ROM", "${workspaceFolder}\\tests\\arm.gba"],
+            "args": ["${workspaceFolder}\\bios\\BIOSGBA.ROM", "${workspaceFolder}\\tests\\gang.gba"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],

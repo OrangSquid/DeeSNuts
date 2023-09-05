@@ -1,3 +1,5 @@
+use std::ops::Index;
+
 use crate::alu::Alu;
 
 // CPU modes
@@ -27,38 +29,39 @@ const STATE_BIT: u32 = 0x20;
 pub struct Arm7 {
     bios: [u8; 0x4000],
     rom: Vec<u8>,
-    pub registers: [u32; 16],
+    pub registers: [u32; 31],
     // Current Program Status Register
     pub cpsr_register: u32,
     // Each u32 is a banked spsr (Saved Program Status Register)
     saved_psr: [u32; 5],
     // The banked out registers when switched out of user/system mode
-    user_system_banked: Vec<u32>,
-    fiq_banked: [u32; 7],
-    supervisor_banked: [u32; 2],
-    abort_banked: [u32; 2],
-    irq_banked: [u32; 2],
-    undefinied_banked: [u32; 2],
+    user_system_banked: (u32, u32),
+    fiq_banked: (u32, u32),
+    supervisor_banked: (u32, u32),
+    abort_banked: (u32, u32),
+    irq_banked: (u32, u32),
+    undefinied_banked: (u32, u32),
 }
 
 impl Arm7 {
     pub fn new() -> Arm7 {
+        let registers = [0u32; 31];
         let mut arm7 = Arm7 {
             bios: [0; 0x4000],
             rom: Vec::new(),
-            registers: [0; 16],
+            registers: registers.to_owned(),
             cpsr_register: SYSTEM_MODE as u32,
             saved_psr: [0; 5],
-            user_system_banked: Vec::new(),
-            fiq_banked: [0; 7],
-            supervisor_banked: [0; 2],
-            abort_banked: [0; 2],
-            irq_banked: [0; 2],
-            undefinied_banked: [0; 2],
+            user_system_banked: (16, 16),
+            fiq_banked: (16, 23),
+            supervisor_banked: (23, 25),
+            abort_banked: (25, 27),
+            irq_banked: (27, 29),
+            undefinied_banked: (29, 31)
         };
         arm7.registers[13] = STACK_USER_SYSTEM_START;
-        arm7.irq_banked[0] = STACK_IRQ_START;
-        arm7.supervisor_banked[0] = STACK_SUPERVISOR_START;
+        arm7.registers[(arm7.fiq_banked.1 - 1) as usize] = STACK_IRQ_START;
+        arm7.registers[(arm7.supervisor_banked.1 - 1) as usize] = STACK_SUPERVISOR_START;
         arm7.registers[15] = START_PC;
         arm7
     }
@@ -80,11 +83,12 @@ impl Arm7 {
         else {
             let opcode = self.fetch_arm();
             self.registers[15] += 4;
-            self.decode_arm(0xE38C_C000);
+            self.decode_arm(opcode);
         }
     }
 
     fn fetch_arm(&mut self) -> u32 {
+        println!("Fetching at {:#08x}", self.registers[15]);
         let pc = (self.registers[15] - START_PC) as usize;
         let opcode_array_slice = &self.rom[pc as usize..(pc + 4) as usize];
         let mut opcode_array: [u8; 4] = [0; 4];
@@ -99,15 +103,32 @@ impl Arm7 {
     // TODO: a single data transfer opcode might be an undefinied instruction, should take care
     // of it at a later date
     fn decode_arm(&mut self, opcode: u32) {
+        println!("Decoding {:#08x}", opcode);
         if !self.check_codition(((opcode & 0xF000_0000) >> 28) as u8) {
             return;
         }
         match opcode & 0xC00_0000 {
             0x0 => {
-                if opcode & 0x12F_FF10 == 0x12F_FF10 {
-                    self.branch_and_exchange(opcode & 0xF);
-                } else {
-                    self.alu_command(opcode & 0x3FF_FFFF);
+                match opcode & 0x90 {
+                    0x0 | 0x80 => self.sr_or_alu(opcode),
+                    0x10 => match opcode & 0x12F_FF10 {
+                        0x12F_FF10 => self.branch_and_exchange(opcode & 0xF),
+                        _ => self.sr_or_alu(opcode)
+                    }
+                    0x90 => match opcode & 0x60 {
+                        0x0 => match opcode & 0x180_0000 {
+                            0x0 => (), // Multiply
+                            0x80_0000 => (), // Multiply long
+                            0x100_0000 => (), // Single Data Swap
+                            _ => panic!()
+                        }
+                        _ => match opcode & 0x40_0000 {
+                            0x400_0000 => (), // Halfword Data Transfer: immediate offset
+                            0x0 => (), // Halfword Data Transfer: register offset
+                            _ => panic!()
+                        }
+                    }
+                    _ => panic!()
                 }
             }
             0x400_0000 => (), // Single Data Transfer or Undefined
@@ -117,18 +138,25 @@ impl Arm7 {
                     opcode & 0x100_0000 == 0x100_0000,
                     (opcode & 0xFF_FFFF) as i32,
                 ),
-                _ => (),
+                _ => panic!(),
             },
             0xC00_0000 => match opcode & 0x200_0000 {
                 0x0 => (), // Coprocessor Data Transfer
                 0x200_0000 => match opcode & 0x100_0000 {
                     0x0 => (),        // Coprocessor Data Operation or Register Transfer
                     0x100_0000 => (), // Software Interrupt
-                    _ => (),
+                    _ => panic!(),
                 },
-                _ => (),
+                _ => panic!(),
             },
-            _ => (),
+            _ => panic!(),
+        }
+    }
+
+    fn sr_or_alu(&mut self, opcode: u32) {
+        match opcode & 0x1F0_0000 {
+            0x100_0000 | 0x120_0000 | 0x140_0000 | 0x160_0000 => (),
+            _ => self.alu_command(opcode & 0x3FF_FFFF)
         }
     }
 
@@ -186,16 +214,74 @@ impl Arm7 {
         self.registers[15] = temp_pc as u32;
     }
 
-    pub fn restore_cpsr(&mut self) {
+    fn get_current_saved_psr(&mut self) -> &mut u32 {
         match self.cpsr_register & 0x1F {
-            USER_MODE => (),
-            FIQ_MODE => self.cpsr_register = self.saved_psr[1],
-            IRQ_MODE => self.cpsr_register = self.saved_psr[2],
-            SUPERVISOR_MODE => self.cpsr_register = self.saved_psr[3],
-            ABORT_MODE => self.cpsr_register = self.saved_psr[4],
-            UNDEFINED_MODE => self.cpsr_register = self.saved_psr[5],
-            SYSTEM_MODE => (),
-            _ => panic!("CPU is an unrecognized mode")
+            USER_MODE => panic!("No saved PSR in user mode"),
+            FIQ_MODE => &mut self.saved_psr[0],
+            IRQ_MODE => &mut self.saved_psr[1],
+            SUPERVISOR_MODE => &mut self.saved_psr[2],
+            ABORT_MODE => &mut self.saved_psr[3],
+            UNDEFINED_MODE => &mut self.saved_psr[4],
+            SYSTEM_MODE => panic!("No saved PSR in system mode"),
+            _ => panic!("CPU is in an unrecognized mode")
+        }
+    }
+
+    pub fn restore_cpsr(&mut self) {
+        self.cpsr_register = *self.get_current_saved_psr();
+    }
+
+    fn sr_operation(&mut self, opcode: u32) {
+        match opcode & 0x20_0000 {
+            0x20_0000 => (), // MSR
+            0x0 => self.mrs(opcode & 0x40_0000 == 0x40_0000, (opcode & 0xF000) >> 12), // MRS
+            _ => panic!()
+        }
+    }
+
+    fn msr(&mut self, opcode: u32) {
+        let mut mask: u32 = 0;
+        match opcode & 0xF_0000 {
+            0x1_0000 => mask = 0xFF,
+            0x2_0000 => mask = 0xFF00,
+            0x3_0000 => mask = 0xFFFF,
+            0x4_0000 => mask = 0xFF0000,
+            0x5_0000 => mask = 0xFF00FF,
+            0x6_0000 => mask = 0xFFFF00,
+            0x7_0000 => mask = 0xFFFFFF,
+            0x8_0000 => mask = 0xFF000000,
+            0x9_0000 => mask = 0xFF0000FF,
+            0xA_0000 => mask = 0xFF00FF00,
+            0xB_0000 => mask = 0xFF00FFFF,
+            0xC_0000 => mask = 0xFFFF0000,
+            0xD_0000 => mask = 0xFFFF00FF,
+            0xE_0000 => mask = 0xFFFFFF00,
+            0xF_0000 => mask = 0xFFFFFFFF,
+            _ => panic!()
+        }
+        let mut operand_2: u32 = 0;
+        // Is immediate
+        if opcode & 0x200_0000 == 0x200_0000 {
+            operand_2 = opcode & 0xFF;
+            let shift = ((opcode & 0xF00) >> 8) * 2;
+            operand_2 = operand_2.rotate_right(shift);
+        }
+        else {
+            operand_2 = self.registers[(opcode & 0xF) as usize];
+        }
+        if self.cpsr_register & 0x1F == USER_MODE && mask & 0xFF == 0xFF {
+            panic!("Tried to set control flags in user mode")
+        }
+        let old_mode = self.cpsr_register & 0x1F;
+        self.cpsr_register = operand_2 & mask;
+    }
+
+    fn mrs(&mut self, current_psr: bool, destination_register: u32) {
+        if current_psr {
+            self.registers[destination_register as usize] = self.cpsr_register;
+        }
+        else {
+            self.registers[destination_register as usize] = *self.get_current_saved_psr();
         }
     }
 }

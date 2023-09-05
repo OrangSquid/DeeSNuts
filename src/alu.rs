@@ -71,13 +71,14 @@ impl Alu for Arm7 {
         let mut operand_2 = 0;
         let destination_register = (opcode & 0xF000) >> 12;
         // Operand 2 is an immediate value
-        if opcode & 0x10_0000 == 0x10_0000 {
+        if opcode & 0x200_0000 == 0x200_0000 {
             operand_2 = opcode & 0xFF;
             let shift = ((opcode & 0xF00) >> 8) * 2;
             operand_2 = operand_2.rotate_right(shift);
         }
         // Operand 2 is a value in a register
-        else {
+        // Either bits 4 and 7 are 1 and 0, respectively or bit 4 is 0
+        else if opcode & 0x90 == 0x10 || opcode & 0x10 == 0 {
             operand_2 = self.registers[(opcode & 0xF) as usize];
             // Shift is in a register
             if opcode & 0x10 == 0x10 {
@@ -93,6 +94,9 @@ impl Alu for Arm7 {
                 operand_2 = self.barrel_shifter(value, operand_2, shift_type, false);
             }
         }
+        else {
+            panic!();
+        }
         let alu_opcode = (opcode & 0x1E0_0000) >> 21;
         let set_condition_codes = (opcode & 0x10_0000) == 0x10_0000;
         self.decode_alu(
@@ -105,7 +109,7 @@ impl Alu for Arm7 {
     }
 
     // TODO make the checks for carry out a seperate functiion
-    // TODO when R15
+    // TODO watch out for r15 prefetching
     fn barrel_shifter(
         &mut self,
         mut value: u32,
