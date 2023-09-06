@@ -67,7 +67,9 @@ pub trait Alu {
 
 impl Alu for Arm7 {
     fn alu_command(&mut self, opcode: u32) {
-        let operand_1 = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        // prefetch compensation
+        let current_pc = self.registers[15];
+        self.registers[15] += 8;
         let mut operand_2 = 0;
         let destination_register = (opcode & 0xF000) >> 12;
         // Operand 2 is an immediate value
@@ -82,6 +84,7 @@ impl Alu for Arm7 {
             operand_2 = self.registers[(opcode & 0xF) as usize];
             // Shift is in a register
             if opcode & 0x10 == 0x10 {
+                self.registers[15] += 4;
                 // Shift is only done using the least significant byte in the register
                 let value = self.registers[((opcode & 0xF00) >> 8) as usize] & 0xFF;
                 let shift_type = 0x60;
@@ -97,8 +100,10 @@ impl Alu for Arm7 {
         else {
             panic!();
         }
+        let operand_1 = self.registers[((opcode & 0xF_0000) >> 16) as usize];
         let alu_opcode = (opcode & 0x1E0_0000) >> 21;
         let set_condition_codes = (opcode & 0x10_0000) == 0x10_0000;
+        self.registers[15] = current_pc;
         self.decode_alu(
             alu_opcode,
             set_condition_codes,
@@ -109,7 +114,6 @@ impl Alu for Arm7 {
     }
 
     // TODO make the checks for carry out a seperate functiion
-    // TODO watch out for r15 prefetching
     fn barrel_shifter(
         &mut self,
         mut value: u32,
