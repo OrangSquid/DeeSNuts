@@ -1,5 +1,3 @@
-use std::ops::Index;
-
 use crate::alu::Alu;
 
 // CPU modes
@@ -119,18 +117,18 @@ impl Arm7 {
                     },
                     0x90 => match opcode & 0x60 {
                         0x0 => match opcode & 0x180_0000 {
-                            0x0 => (),        // Multiply
-                            0x80_0000 => (),  // Multiply long
+                            0x0 => self.multiply(opcode),
+                            0x80_0000 => self.multiply_long(opcode),
                             0x100_0000 => (), // Single Data Swap
                             _ => panic!(),
                         },
                         _ => match opcode & 0x40_0000 {
                             0x400_0000 => (), // Halfword Data Transfer: immediate offset
                             0x0 => (),        // Halfword Data Transfer: register offset
-                            _ => panic!(),
+                            _ => panic!("Undefinied instruction"),
                         },
                     },
-                    _ => panic!(),
+                    _ => panic!("Undefinied instruction"),
                 }
             }
             0x400_0000 => (), // Single Data Transfer or Undefined
@@ -140,18 +138,9 @@ impl Arm7 {
                     opcode & 0x100_0000 == 0x100_0000,
                     (opcode & 0xFF_FFFF) as i32,
                 ),
-                _ => panic!(),
+                _ => panic!("Undefinied instruction"),
             },
-            0xC00_0000 => match opcode & 0x200_0000 {
-                0x0 => (), // Coprocessor Data Transfer
-                0x200_0000 => match opcode & 0x100_0000 {
-                    0x0 => (),        // Coprocessor Data Operation or Register Transfer
-                    0x100_0000 => (), // Software Interrupt
-                    _ => panic!(),
-                },
-                _ => panic!(),
-            },
-            _ => panic!(),
+            _ => panic!("Undefinied instruction"),
         }
     }
 
@@ -322,6 +311,66 @@ impl Arm7 {
             self.registers[destination_register as usize] = self.cpsr_register;
         } else {
             self.registers[destination_register as usize] = *self.get_current_saved_psr();
+        }
+    }
+
+    fn multiply(&mut self, opcode: u32) {
+        let mut operand_1 = 0;
+        // If accumulate
+        if opcode & 0x20_0000 == 0x20_0000 {
+            operand_1 = self.registers[(opcode & 0xF000) as usize];
+        }
+        let operand_2 = self.registers[(opcode & 0xF00) as usize];
+        let operand_3 = self.registers[(opcode & 0xF) as usize];
+        self.registers[(opcode & 0xF_0000) as usize] = operand_3.wrapping_mul(operand_2).wrapping_add(operand_1);
+        // If set condition
+        if opcode & 0x10_0000 == 0x10_0000 {
+            self.set_multiply_flags(self.registers[(opcode & 0xF_0000) as usize]);
+        }
+    }
+
+    fn multiply_long(&mut self, opcode: u32) {
+        let register_hi = opcode & 0xF_0000;
+        let register_lo = opcode & 0xF000;
+        let operand_1 = self.registers[(opcode & 0xF00) as usize];
+        let operand_2 = self.registers[(opcode & 0xF) as usize];
+        let mut operand_3 = 0;
+        // If accumulate
+        if opcode & 0x20_0000 == 0x20_0000 {
+            operand_3 = (self.registers[register_hi as usize] << 32) as u64 | self.registers[register_lo as usize] as u64;
+        }
+        let mut result = 0;
+        // If Signed
+        if opcode & 0x40_0000 == 0x40_0000 {
+            result = (operand_2 as i64 * operand_1 as i64).wrapping_add(operand_3 as i64) as u64;
+        }
+        else {
+            result = (operand_2 as u64 * operand_1 as u64).wrapping_add(operand_3);
+        }
+        self.registers[register_hi as usize] = (result & 0xFFFF_FFFF_0000_0000 >> 32) as u32;
+        self.registers[register_lo as usize] = (result & 0xFFFF_FFFF) as u32;
+        if opcode & 0x10_0000 == 0x10_0000 {
+            self.set_long_multiply_flags(result);
+        }
+    }
+
+    fn set_long_multiply_flags(&mut self, result: u64) {
+        self.cpsr_register &= 0x1FFF_FFFF;
+        if result == 0 {
+            self.cpsr_register |= ZERO_FLAG;
+        }
+        if result & 0x8000_0000_0000_0000 == 0x8000_0000_0000_0000 {
+            self.cpsr_register |= SIGN_FLAG;
+        }
+    }
+
+    fn set_multiply_flags(&mut self, result: u32) {
+        self.cpsr_register &= 0x1FFF_FFFF;
+        if result == 0 {
+            self.cpsr_register |= ZERO_FLAG;
+        }
+        if result & 0x8000_0000 == 0x8000_0000 {
+            self.cpsr_register |= SIGN_FLAG;
         }
     }
 }
