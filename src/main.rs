@@ -4,6 +4,7 @@ use sdl2::keyboard::Keycode;
 
 pub mod arm7;
 pub mod alu;
+pub mod memory;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

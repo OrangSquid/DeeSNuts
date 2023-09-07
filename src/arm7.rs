@@ -1,4 +1,5 @@
 use crate::alu::Alu;
+use crate::memory::Memory;
 
 // CPU modes
 const USER_MODE: u32 = 0x10;
@@ -25,8 +26,7 @@ const FIQ_BIT: u32 = 0x40;
 const STATE_BIT: u32 = 0x20;
 
 pub struct Arm7 {
-    bios: [u8; 0x4000],
-    rom: Vec<u8>,
+    memory: Memory,
     pub registers: [u32; 16],
     // Current Program Status Register
     pub cpsr_register: u32,
@@ -46,8 +46,7 @@ impl Arm7 {
     pub fn new() -> Arm7 {
         // TODO: THE BANKED REGISTERS I HATE IT HERE
         let mut arm7 = Arm7 {
-            bios: [0; 0x4000],
-            rom: Vec::new(),
+            memory: Memory::new(),
             registers: [0; 16],
             cpsr_register: SYSTEM_MODE as u32,
             saved_psr: [0; 5],
@@ -67,11 +66,11 @@ impl Arm7 {
     }
 
     pub fn load_bios(&mut self, bios: Vec<u8>) {
-        self.bios.copy_from_slice(&bios);
+        self.memory.load_bios(bios);
     }
 
     pub fn load_rom(&mut self, rom: Vec<u8>) {
-        self.rom.clone_from(&rom)
+        self.memory.load_rom(rom)
     }
 
     pub fn next(&mut self) {
@@ -89,10 +88,11 @@ impl Arm7 {
 
     fn fetch_arm(&mut self) -> u32 {
         println!("Fetching at {:#08x}", self.registers[15]);
-        let pc = (self.registers[15] - START_PC) as usize;
-        let opcode_array_slice = &self.rom[pc as usize..(pc + 4) as usize];
+        let pc = self.registers[15] as usize;
         let mut opcode_array: [u8; 4] = [0; 4];
-        opcode_array.copy_from_slice(opcode_array_slice);
+        for i in 0..4 {
+            opcode_array[i] = self.memory[pc + i];
+        }
         u32::from_le_bytes(opcode_array)
     }
 

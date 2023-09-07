@@ -65,6 +65,10 @@ pub trait Alu {
     fn set_arithmetic_operations_cpsr_flags(&mut self, operand_1: u32, result: u32, operand_2: u32);
 }
 
+impl Arm7 {
+    
+}
+
 impl Alu for Arm7 {
     fn alu_command(&mut self, opcode: u32) {
         // prefetch compensation
