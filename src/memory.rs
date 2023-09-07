@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::ops::{Index, Range, IndexMut};
 
 const BIOS_ADDRESS: usize = 0x00000000;
 const BIOS_END: usize = 0x00003FFF;
@@ -60,6 +60,59 @@ impl Index<usize> for Memory {
             ROM_ADDRESS..=ROM_END => &self.rom[index],
             SRAM_ADDRESS..=SRAM_END => todo!(),
             _ => panic!("Invalid memory address: {:#X}", index),
+        }
+    }
+}
+
+impl IndexMut<usize> for Memory {
+    fn index_mut(&mut self, index: usize) -> &mut u8 {
+        match index {
+            BIOS_ADDRESS..=BIOS_END => &mut self.bios[index],
+            EWRAM_ADDRESS..=EWRAM_END => &mut self.ewram[index],
+            IWRAM_ADDRESS..=IWRAM_END => &mut self.iwram[index],
+            IO_REGISTERS..=IO_REGISTERS_END => todo!(),
+            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => todo!(),
+            VRAM_ADDRESS..=VRAM_END => todo!(),
+            OAM_ADRESS..=OAM_END => todo!(),
+            ROM_ADDRESS..=ROM_END => &mut self.rom[index],
+            SRAM_ADDRESS..=SRAM_END => todo!(),
+            _ => panic!("Invalid memory address: {:#X}", index),
+        }
+    }
+}
+
+impl Index<Range<usize>> for Memory {
+    type Output = [u8];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        match index.clone().min().unwrap() {
+            BIOS_ADDRESS..=BIOS_END => &self.bios[index],
+            EWRAM_ADDRESS..=EWRAM_END => &self.ewram[index],
+            IWRAM_ADDRESS..=IWRAM_END => &self.iwram[index],
+            IO_REGISTERS..=IO_REGISTERS_END => todo!(),
+            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => todo!(),
+            VRAM_ADDRESS..=VRAM_END => todo!(),
+            OAM_ADRESS..=OAM_END => todo!(),
+            ROM_ADDRESS..=ROM_END => &self.rom[index],
+            SRAM_ADDRESS..=SRAM_END => todo!(),
+            _ => panic!("Invalid memory address: {:#X}", index.min().unwrap()),
+        }
+    }
+}
+
+impl IndexMut<Range<usize>> for Memory {
+    fn index_mut(&mut self, index: Range<usize>) -> &mut [u8] {
+        match index.clone().min().unwrap() {
+            BIOS_ADDRESS..=BIOS_END => &mut self.bios[index],
+            EWRAM_ADDRESS..=EWRAM_END => &mut self.ewram[index],
+            IWRAM_ADDRESS..=IWRAM_END => &mut self.iwram[index],
+            IO_REGISTERS..=IO_REGISTERS_END => todo!(),
+            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => todo!(),
+            VRAM_ADDRESS..=VRAM_END => todo!(),
+            OAM_ADRESS..=OAM_END => todo!(),
+            ROM_ADDRESS..=ROM_END => &mut self.rom[index],
+            SRAM_ADDRESS..=SRAM_END => todo!(),
+            _ => panic!("Invalid memory address: {:#X}", index.min().unwrap()),
         }
     }
 }

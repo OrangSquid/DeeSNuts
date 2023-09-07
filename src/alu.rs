@@ -3,74 +3,8 @@ use crate::arm7::CARRY_FLAG;
 use crate::arm7::OVERFLOW_FLAG;
 use crate::arm7::ZERO_FLAG;
 
-pub trait Alu {
-    fn alu_command(&mut self, opcode: u32);
-
-    fn barrel_shifter(
-        &mut self,
-        value: u32,
-        operand: u32,
-        shift_type: u32,
-        register_specified_shift: bool,
-    ) -> u32;
-
-    fn decode_alu(
-        &mut self,
-        opcode: u32,
-        set_condition_codes: bool,
-        operand_1: u32,
-        destination_register: u32,
-        operand_2: u32,
-    );
-
-    fn and(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn exclusive_or(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn right_subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn add(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn add_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn subtract_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn right_subtract_carry(
-        &mut self,
-        operand_1: u32,
-        destination_register: u32,
-        operand_2: u32,
-    ) -> u32;
-
-    fn tst_and(operand_1: u32, operand_2: u32) -> u32;
-
-    fn exclusive_or_teq(operand_1: u32, operand_2: u32) -> u32;
-
-    fn subtract_cmp(operand_1: u32, operand_2: u32) -> u32;
-
-    fn add_cmn(operand_1: u32, operand_2: u32) -> u32;
-
-    fn orr(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn mov(&mut self, destination_register: u32, operand_2: u32) -> u32;
-
-    fn bit_clear(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32;
-
-    fn move_not(&mut self, destination_register: u32, operand_2: u32) -> u32;
-
-    fn set_logical_operations_cpsr_flags(&mut self, result: u32);
-
-    fn set_arithmetic_operations_cpsr_flags(&mut self, operand_1: u32, result: u32, operand_2: u32);
-}
-
 impl Arm7 {
-    
-}
-
-impl Alu for Arm7 {
-    fn alu_command(&mut self, opcode: u32) {
+    pub fn alu_command(&mut self, opcode: u32) {
         // prefetch compensation
         let current_pc = self.registers[15];
         self.registers[15] += 8;
@@ -118,7 +52,7 @@ impl Alu for Arm7 {
     }
 
     // TODO make the checks for carry out a seperate functiion
-    fn barrel_shifter(
+    pub fn barrel_shifter(
         &mut self,
         mut value: u32,
         mut operand: u32,

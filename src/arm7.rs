@@ -1,4 +1,3 @@
-use crate::alu::Alu;
 use crate::memory::Memory;
 
 // CPU modes
@@ -131,7 +130,7 @@ impl Arm7 {
                     _ => panic!("Undefinied instruction"),
                 }
             }
-            0x400_0000 => (), // Single Data Transfer or Undefined
+            0x400_0000 => self.single_data_transfer(opcode),
             0x800_0000 => match opcode & 0x200_0000 {
                 0x0 => (), // Block Data Transfer
                 0x200_0000 => self.branch(
@@ -337,7 +336,7 @@ impl Arm7 {
         let mut operand_3 = 0;
         // If accumulate
         if opcode & 0x20_0000 == 0x20_0000 {
-            operand_3 = (self.registers[register_hi as usize] << 32) as u64 | self.registers[register_lo as usize] as u64;
+            operand_3 = ((self.registers[register_hi as usize] as u64) << 32) | self.registers[register_lo as usize] as u64;
         }
         let mut result = 0;
         // If Signed
@@ -371,6 +370,98 @@ impl Arm7 {
         }
         if result & 0x8000_0000 == 0x8000_0000 {
             self.cpsr_register |= SIGN_FLAG;
+        }
+    }
+    
+    fn single_data_transfer(&mut self, opcode: u32) {
+        self.registers[15] += 8;
+        let base_register = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        self.registers[15] += 4;
+        let mut src_dst_register = self.registers[((opcode & 0xF000) >> 12) as usize];
+        let mut offset = 0;
+        self.registers[15] -= 4;
+        // TODO repeated code with alu
+        // Is register offset
+        if opcode & 0x200_0000 == 0x200_0000 {
+            offset = self.registers[(opcode & 0xF) as usize];
+            // Shift is in a register
+            if opcode & 0x10 == 0x10 {
+                self.registers[15] += 4;
+                // Shift is only done using the least significant byte in the register
+                let value = self.registers[((opcode & 0xF00) >> 8) as usize] & 0xFF;
+                let shift_type = 0x60;
+                offset = self.barrel_shifter(value, offset, shift_type, true);
+            }
+            // Shift is an immediate value
+            else {
+                let value = (opcode & 0xF80) >> 7;
+                let shift_type = (opcode & 0x60) >> 5;
+                offset = self.barrel_shifter(value, offset, shift_type, false);
+            }
+        }
+        // Is immediate value
+        else {
+            offset = opcode & 0xFFF;
+        }
+        // Pre indexing
+        if opcode & 0x100_0000 == 0x100_0000 {
+            if opcode & 0x80_0000 == 0x80_0000 {
+                src_dst_register += offset;
+            }
+            else {
+                src_dst_register -= offset;
+            }
+        }
+        // Load from memory
+        if opcode & 0x10_0000 == 0x10_0000 {
+            self.load_memory(base_register, src_dst_register, opcode & 0x40_0000 == 0x40_0000);
+        }
+        else {
+            self.store_memory(base_register, src_dst_register, opcode & 0x40_0000 == 0x40_0000)
+        }
+        // Post Indexing
+        if opcode & 0x100_0000 == 0x0 {
+            if opcode & 0x80_0000 == 0x80_0000 {
+                src_dst_register += offset;
+            }
+            else {
+                src_dst_register -= offset;
+            }
+        }
+        // Write Back
+        if opcode & 0x20_0000 == 0x20_0000 {
+            self.registers[((opcode & 0xF000) >> 12) as usize] = src_dst_register;
+        }
+    }
+
+    
+    
+    fn load_memory(&mut self, base_register: u32, src_register: u32, is_byte: bool) {
+        let mut value = self.memory[src_register as usize] as u32;
+        if !is_byte {
+            // Is Word aligned
+            if src_register % 4 == 0 {
+                for i in 1..4 {
+                    value |= (self.memory[(src_register + i) as usize] as u32) << (8 * i);
+                }
+            }
+            // Is halfword aligned
+            else {
+                value |= (self.memory[(src_register + 1) as usize] as u32) << 8;
+                value |= (self.memory[(src_register - 2) as usize] as u32) << 16;
+                value |= (self.memory[(src_register - 1) as usize] as u32) << 24;
+            }
+        }
+        self.registers[base_register as usize] = value;
+    }
+
+    fn store_memory(&mut self, base_register: u32, dst_register: u32, is_byte: bool) {
+        let mut value = self.registers[base_register as usize] as u32;
+        if !is_byte {
+            self.memory[dst_register as usize..(dst_register + 4) as usize].copy_from_slice(&value.to_le_bytes());
+        }
+        else {
+            self.memory[dst_register as usize] = (value & 0xFF) as u8;
         }
     }
 }
