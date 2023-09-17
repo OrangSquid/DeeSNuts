@@ -1,3 +1,5 @@
+use sdl2::sys::__uint32_t;
+
 use crate::memory::Memory;
 
 // CPU modes
@@ -103,10 +105,10 @@ impl Arm7 {
     // of it at a later date
     fn decode_arm(&mut self, opcode: u32) {
         println!("Decoding {:#08x}", opcode);
-        if !self.check_codition(((opcode & 0xF000_0000) >> 28) as u8) {
+        if !self.check_codition((opcode >> 28) & 0xF) {
             return;
         }
-        match opcode & 0xC00_0000 {
+        match opcode & (0x3 << 26) {
             0x0 => {
                 match opcode & 0x90 {
                     0x0 | 0x80 => self.sr_or_alu(opcode),
@@ -121,10 +123,8 @@ impl Arm7 {
                             0x100_0000 => (), // Single Data Swap
                             _ => panic!(),
                         },
-                        _ => match opcode & 0x40_0000 {
-                            0x400_0000 => (), // Halfword Data Transfer: immediate offset
-                            0x0 => (),        // Halfword Data Transfer: register offset
-                            _ => panic!("Undefinied instruction"),
+                        _ => if opcode & 0x40_0000 == 0x40_0000 {
+                            self.halfword_data_transfer(opcode);
                         },
                     },
                     _ => panic!("Undefinied instruction"),
@@ -138,7 +138,7 @@ impl Arm7 {
                     (opcode & 0xFF_FFFF) as i32,
                 ),
                 _ => panic!("Undefinied instruction"),
-            },
+            }
             _ => panic!("Undefinied instruction"),
         }
     }
@@ -148,7 +148,7 @@ impl Arm7 {
             USER_MODE | SYSTEM_MODE => self.user_banked.copy_from_slice(&mut self.registers[13..15]),
             FIQ_MODE => {
                 // Swap beacuse the other modes all share R8 through R12
-                &self.registers[8..13].swap_with_slice(&mut self.fiq_lo_banked);
+                self.registers[8..13].swap_with_slice(&mut self.fiq_lo_banked);
                 self.fiq_hi_banked.copy_from_slice(&mut self.registers[13..15]);
             }
             SUPERVISOR_MODE => self.supervisor_banked.copy_from_slice(&mut self.registers[13..15]),
@@ -179,7 +179,7 @@ impl Arm7 {
         }
     }
 
-    fn check_codition(&mut self, condition: u8) -> bool {
+    fn check_codition(&mut self, condition: u32) -> bool {
         match condition {
             0x0 => self.cpsr_register & ZERO_FLAG == ZERO_FLAG, // Z flag is set
             0x1 => self.cpsr_register & ZERO_FLAG == 0x0,       // Z flag is not set
@@ -265,25 +265,24 @@ impl Arm7 {
     }
 
     fn msr(&mut self, opcode: u32) {
-        let mut mask: u32 = 0;
-        match opcode & 0xF_0000 {
-            0x1_0000 => mask = 0xFF,
-            0x2_0000 => mask = 0xFF00,
-            0x3_0000 => mask = 0xFFFF,
-            0x4_0000 => mask = 0xFF0000,
-            0x5_0000 => mask = 0xFF00FF,
-            0x6_0000 => mask = 0xFFFF00,
-            0x7_0000 => mask = 0xFFFFFF,
-            0x8_0000 => mask = 0xFF000000,
-            0x9_0000 => mask = 0xFF0000FF,
-            0xA_0000 => mask = 0xFF00FF00,
-            0xB_0000 => mask = 0xFF00FFFF,
-            0xC_0000 => mask = 0xFFFF0000,
-            0xD_0000 => mask = 0xFFFF00FF,
-            0xE_0000 => mask = 0xFFFFFF00,
-            0xF_0000 => mask = 0xFFFFFFFF,
+        let mask: u32 = match opcode & (0xF << 16) {
+            0x1 => 0xFF,
+            0x2 => 0xFF00,
+            0x3 => 0xFFFF,
+            0x4 => 0xFF0000,
+            0x5 => 0xFF00FF,
+            0x6 => 0xFFFF00,
+            0x7 => 0xFFFFFF,
+            0x8 => 0xFF000000,
+            0x9 => 0xFF0000FF,
+            0xA => 0xFF00FF00,
+            0xB => 0xFF00FFFF,
+            0xC => 0xFFFF0000,
+            0xD => 0xFFFF00FF,
+            0xE => 0xFFFFFF00,
+            0xF => 0xFFFFFFFF,
             _ => panic!(),
-        }
+        };
         let mut operand_2: u32 = 0;
         // Is immediate
         if opcode & 0x200_0000 == 0x200_0000 {
@@ -391,6 +390,7 @@ impl Arm7 {
                 let value = self.registers[((opcode & 0xF00) >> 8) as usize] & 0xFF;
                 let shift_type = 0x60;
                 offset = self.barrel_shifter(value, offset, shift_type, true);
+                self.registers[15] -= 4;
             }
             // Shift is an immediate value
             else {
@@ -432,27 +432,27 @@ impl Arm7 {
         if opcode & 0x20_0000 == 0x20_0000 {
             self.registers[((opcode & 0xF000) >> 12) as usize] = src_dst_register;
         }
+        self.registers[15] -= 8;
     }
-
-    
     
     fn load_memory(&mut self, base_register: u32, src_register: u32, is_byte: bool) {
-        let mut value = self.memory[src_register as usize] as u32;
+        let src_register_value = self.registers[src_register as usize];
+        let mut value_to_store = self.memory[src_register_value as usize] as u32;
         if !is_byte {
             // Is Word aligned
-            if src_register % 4 == 0 {
+            if src_register_value % 4 == 0 {
                 for i in 1..4 {
-                    value |= (self.memory[(src_register + i) as usize] as u32) << (8 * i);
+                    value_to_store |= (self.memory[(src_register_value + i) as usize] as u32) << (8 * i);
                 }
             }
             // Is halfword aligned
             else {
-                value |= (self.memory[(src_register + 1) as usize] as u32) << 8;
-                value |= (self.memory[(src_register - 2) as usize] as u32) << 16;
-                value |= (self.memory[(src_register - 1) as usize] as u32) << 24;
+                value_to_store |= (self.memory[(src_register_value + 1) as usize] as u32) << 8;
+                value_to_store |= (self.memory[(src_register_value - 2) as usize] as u32) << 16;
+                value_to_store |= (self.memory[(src_register_value - 1) as usize] as u32) << 24;
             }
         }
-        self.registers[base_register as usize] = value;
+        self.registers[base_register as usize] = value_to_store;
     }
 
     fn store_memory(&mut self, base_register: u32, dst_register: u32, is_byte: bool) {
@@ -462,6 +462,72 @@ impl Arm7 {
         }
         else {
             self.memory[dst_register as usize] = (value & 0xFF) as u8;
+        }
+    }
+
+    fn halfword_data_transfer(&mut self, opcode: u32) {
+        self.registers[15] += 8;
+        let base_register = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        self.registers[15] += 4;
+        let mut src_dst_register = self.registers[((opcode & 0xF000) >> 12) as usize];
+        self.registers[15] -= 4;
+        let offset = match opcode & 0x40_0000 {
+            0x40_0000 => opcode & 0xF | (opcode & 0xF00) >> 4,
+            0x0 => self.registers[(opcode & 0xF) as usize],
+            _ => panic!("Something went terribly wrong while deducing offset type in halfword transfer")
+        };
+        // Pre indexing
+        if opcode & 0x100_0000 == 0x100_0000 {
+            if opcode & 0x80_0000 == 0x80_0000 {
+                src_dst_register += offset;
+            }
+            else {
+                src_dst_register -= offset;
+            }
+        }
+        // Load from memory
+        if opcode & 0x10_0000 == 0x10_0000 {
+            self.load_halfword(base_register, src_dst_register, opcode & 0x60);
+        }
+        else {
+            self.store_halfword(base_register, src_dst_register, opcode & 0x60)
+        }
+        // Post Indexing
+        if opcode & 0x100_0000 == 0x0 {
+            if opcode & 0x80_0000 == 0x80_0000 {
+                src_dst_register += offset;
+            }
+            else {
+                src_dst_register -= offset;
+            }
+        }
+        // Write Back
+        if opcode & 0x20_0000 == 0x20_0000 {
+            self.registers[((opcode & 0xF000) >> 12) as usize] = src_dst_register;
+        }
+        self.registers[15] -= 8;
+    }
+
+    fn load_halfword(&mut self, base_register: u32, src_register: u32, sh: u32) {
+        let mut opcode_array: [u8; 4] = [0; 4];
+        for i in 0..4 {
+            opcode_array[i] = self.memory[(self.registers[src_register as usize] as usize + i) as usize];
+        }
+        let value = u32::from_le_bytes(opcode_array);
+        match sh {
+            0x20 => self.registers[base_register as usize] = value & 0xFFFF,
+            0x40 => self.registers[base_register as usize] = (((value & 0xFF) as i8) as i32) as u32,
+            0x60 => self.registers[base_register as usize] = (((value & 0xFFFF) as i16) as i32) as u32,
+            _ => panic!("Something went terribly wrong while loading a halfword")
+        }
+    }
+
+    fn store_halfword(&mut self, base_register: u32, dst_register: u32, sh: u32) {
+        let dst_register_value = self.registers[dst_register as usize];
+        let value_to_store = self.registers[base_register as usize];
+        match sh {
+            0x20 => self.memory[dst_register_value as usize..(dst_register_value + 2) as usize].copy_from_slice(&u16::to_le_bytes(value_to_store as u16)),
+            _ => panic!("Something went terribly wrong while storing a halfword")
         }
     }
 }
