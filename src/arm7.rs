@@ -530,4 +530,89 @@ impl Arm7 {
             _ => panic!("Something went terribly wrong while storing a halfword")
         }
     }
+
+    fn block_data_transfer(&mut self, opcode: u32) {
+        let mut base_register = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        let mut register_mask = opcode & 0xFFFF;
+        let mut registers = Vec::new();
+        registers.reserve(register_mask.count_ones() as usize);
+        for i in 0u8..16u8 {
+            if register_mask & 0x1 == 0x1 {
+                registers.push(i);
+            }
+            register_mask = register_mask >> 1;
+        }
+        // Pre Indexing
+        if opcode & 0x100_0000 == 0x100_0000 {
+            if opcode & 0x80_0000 == 0x80_0000 {
+                base_register += 4;
+            }
+            else {
+                base_register -= 4;
+            }
+        }
+        // Store old mode if S bit is set to transfer user mode registers
+        let mut old_mode = 0;
+        if opcode & 0x40_0000 == 0x40_0000 && self.cpsr_register & USER_MODE != USER_MODE {
+            old_mode = self.cpsr_register & 0x1F;
+            self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
+            self.switch_modes(old_mode)
+        }
+        // Load Multiple
+        if opcode & 0x10_0000 == 0x10_0000 {
+            self.load_multiple(base_register, &registers, opcode & 0x80_0000 == 0x80_0000, old_mode);
+        }
+        // Store Multiple
+        else {
+            self.store_multiple(base_register, &registers, opcode & 0x80_0000 == 0x80_0000);    
+        }
+        // Restore old mode
+        if opcode & 0x40_0000 == 0x40_0000 {
+            self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
+            self.switch_modes(USER_MODE)
+        }
+        // Write Back
+        if opcode & 0x20_0000 == 0x20_0000 {
+            if opcode & 0x80_0000 == 0x80_0000 {
+                self.registers[((opcode & 0xF_0000) >> 16) as usize] = registers.len() as u32 * 4;
+            }
+            else {
+                self.registers[((opcode & 0xF_0000) >> 16) as usize] = registers.len() as u32 * 4;
+            }
+        }
+    }
+
+    fn load_multiple(&mut self, mut base: u32, registers: &Vec<u8>, up: bool, old_mode: u32) {
+        for register in registers {
+            if *register == 15 {
+                self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
+                self.cpsr_register = *self.get_current_saved_psr();
+                self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
+            }
+            let mut temp_value: [u8; 4] = [0; 4];
+            for i in 0..4 {
+                temp_value[i] = self.memory[base as usize + i];
+            }
+            self.registers[*register as usize] = u32::from_le_bytes(temp_value);
+            if up {
+                base += 4;
+            }
+            else {
+                base -= 4;
+            }
+        }
+    }
+
+    fn store_multiple(&mut self, mut base: u32, registers: &Vec<u8>, up: bool) {
+        for register in registers {
+            let value_to_store = self.registers[*register as usize];
+            self.memory[base as usize..(base + 4) as usize].copy_from_slice(&u32::to_le_bytes(value_to_store as u32));
+            if up {
+                base += 4;
+            }
+            else {
+                base -= 4;
+            }
+        }
+    }
 }
