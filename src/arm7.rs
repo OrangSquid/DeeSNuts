@@ -1,5 +1,3 @@
-use sdl2::sys::__uint32_t;
-
 use crate::memory::Memory;
 
 // CPU modes
@@ -120,7 +118,7 @@ impl Arm7 {
                         0x0 => match opcode & 0x180_0000 {
                             0x0 => self.multiply(opcode),
                             0x80_0000 => self.multiply_long(opcode),
-                            0x100_0000 => (), // Single Data Swap
+                            0x100_0000 => self.single_data_swap(opcode), // Single Data Swap
                             _ => panic!(),
                         },
                         _ => if opcode & 0x40_0000 == 0x40_0000 {
@@ -132,7 +130,7 @@ impl Arm7 {
             }
             0x400_0000 => self.single_data_transfer(opcode),
             0x800_0000 => match opcode & 0x200_0000 {
-                0x0 => (), // Block Data Transfer
+                0x0 => self.block_data_transfer(opcode),
                 0x200_0000 => self.branch(
                     opcode & 0x100_0000 == 0x100_0000,
                     (opcode & 0xFF_FFFF) as i32,
@@ -614,5 +612,16 @@ impl Arm7 {
                 base -= 4;
             }
         }
+    }
+
+    fn single_data_swap(&mut self, opcode: u32) {
+        let base_register = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        let dst_register = (opcode & 0xF000) >> 12;
+        let src_register = opcode & 0xF;
+        let is_byte = opcode & 0x40_0000 == 0x40_0000;
+        // Don't mind the switch in the names
+        // It's kinda confusing but I hope it works
+        self.load_memory(dst_register, base_register, is_byte);
+        self.store_memory(src_register, base_register, is_byte);
     }
 }
