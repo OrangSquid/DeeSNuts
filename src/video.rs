@@ -6,7 +6,7 @@ use sdl2::{
     video::{Window, WindowContext},
 };
 
-use crate::memory::{self, Memory};
+use crate::memory::Memory;
 
 pub struct Video {
     window: Canvas<Window>,
@@ -25,23 +25,24 @@ impl Video {
     }
 
     pub fn display(&mut self) {
-        let video_mode = self.memory.borrow()[0x0400_0000] & 0x7;
+        self.video_mode_3();
+        /* let video_mode = self.memory.borrow().get_halfword(0x0400_0000) & 0x7;
         match video_mode {
             0x3 => self.video_mode_3(),
             _ => ()
-        }
+        } */
     }
 
     fn video_mode_3(&mut self) {
-        let mut memory_mut = self.memory.borrow_mut();
+        let memory_mut = &mut self.memory.borrow_mut()[0x0600_0000..0x0601_2C00];
         let screen = Surface::from_data(
-            &mut memory_mut[0x0600_0000..0x0601_2C00],
+            memory_mut,
             240,
             160,
             480,
             sdl2::pixels::PixelFormatEnum::RGBA5551,
         ).unwrap();
-        self.texture_creator.create_texture_from_surface(screen).unwrap();
+        self.window.copy(&self.texture_creator.create_texture_from_surface(screen).unwrap(), None, None).unwrap();
         self.window.present();
-    }
+     }
 }

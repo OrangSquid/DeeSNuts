@@ -61,7 +61,7 @@ impl Arm7 {
     ) -> u32 {
         match shift_type {
             0x0 => {
-                let carry_bit = (1 as u32) << (32 - value);
+                let carry_bit = (1 as u32) << (31 - value);
                 if (operand & carry_bit != 0) && value != 0 {
                     self.cpsr_register |= CARRY_FLAG;
                 }

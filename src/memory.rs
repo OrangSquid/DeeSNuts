@@ -73,6 +73,20 @@ impl Memory {
         }
         u32::from_le_bytes(bytes)
     }
+
+    pub fn store_byte(&mut self, address: u32, value: u8) {
+        self[address as usize] = value;
+    }
+
+    pub fn store_halfword(&mut self, address: u32, value: u16) {
+        let address_idx = address as usize;
+        self[address_idx..address_idx + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn store_word(&mut self, address: u32, value: u32) {
+        let address_idx = address as usize;
+        self[address_idx..address_idx + 4].copy_from_slice(&value.to_le_bytes());
+    }
 }
 
 impl Index<usize> for Memory {
@@ -116,34 +130,40 @@ impl Index<Range<usize>> for Memory {
     type Output = [u8];
 
     fn index(&self, index: Range<usize>) -> &Self::Output {
-        match index.clone().min().unwrap() {
-            BIOS_ADDRESS..=BIOS_END => &self.bios[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            EWRAM_ADDRESS..=EWRAM_END => &self.ewram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            IWRAM_ADDRESS..=IWRAM_END => &self.iwram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            IO_REGISTERS..=IO_REGISTERS_END => &self.io_registers[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &self.pallete_ram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            VRAM_ADDRESS..=VRAM_END => &self.vram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            OAM_ADRESS..=OAM_END => &self.oam[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            ROM_ADDRESS..=ROM_END => &self.rom[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
+        let min = index.clone().min().unwrap();
+        let min_idx = min & 0xFF_FFFF;
+        let max = index.max().unwrap() & 0xFF_FFFF;
+        match min {
+            BIOS_ADDRESS..=BIOS_END => &self.bios[min_idx..=max],
+            EWRAM_ADDRESS..=EWRAM_END => &self.ewram[min_idx..=max],
+            IWRAM_ADDRESS..=IWRAM_END => &self.iwram[min_idx..=max],
+            IO_REGISTERS..=IO_REGISTERS_END => &self.io_registers[min_idx..=max],
+            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &self.pallete_ram[min_idx..=max],
+            VRAM_ADDRESS..=VRAM_END => &self.vram[min_idx..=max],
+            OAM_ADRESS..=OAM_END => &self.oam[min_idx..=max],
+            ROM_ADDRESS..=ROM_END => &self.rom[min_idx..=max],
             SRAM_ADDRESS..=SRAM_END => todo!(),
-            _ => panic!("Invalid memory address: {:#X}", index.min().unwrap()),
+            _ => panic!("Invalid memory address: {:#X}", min),
         }
     }
 }
 
 impl IndexMut<Range<usize>> for Memory {
     fn index_mut(&mut self, index: Range<usize>) -> &mut [u8] {
-        match index.clone().min().unwrap() {
-            BIOS_ADDRESS..=BIOS_END => &mut self.bios[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            EWRAM_ADDRESS..=EWRAM_END => &mut self.ewram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            IWRAM_ADDRESS..=IWRAM_END => &mut self.iwram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            IO_REGISTERS..=IO_REGISTERS_END => &mut self.io_registers[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &mut self.pallete_ram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            VRAM_ADDRESS..=VRAM_END => &mut self.vram[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            OAM_ADRESS..=OAM_END => &mut self.oam[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
-            ROM_ADDRESS..=ROM_END => &mut self.rom[index.clone().min().unwrap() & 0xFF_FFFF..index.max().unwrap() & 0xFF_FFFF],
+        let min = index.clone().min().unwrap();
+        let min_idx = min & 0xFF_FFFF;
+        let max = index.max().unwrap() & 0xFF_FFFF;
+        match min {
+            BIOS_ADDRESS..=BIOS_END => &mut self.bios[min_idx..=max],
+            EWRAM_ADDRESS..=EWRAM_END => &mut self.ewram[min_idx..=max],
+            IWRAM_ADDRESS..=IWRAM_END => &mut self.iwram[min_idx..=max],
+            IO_REGISTERS..=IO_REGISTERS_END => &mut self.io_registers[min_idx..=max],
+            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &mut self.pallete_ram[min_idx..=max],
+            VRAM_ADDRESS..=VRAM_END => &mut self.vram[min_idx..=max],
+            OAM_ADRESS..=OAM_END => &mut self.oam[min_idx..=max],
+            ROM_ADDRESS..=ROM_END => &mut self.rom[min_idx..=max],
             SRAM_ADDRESS..=SRAM_END => todo!(),
-            _ => panic!("Invalid memory address: {:#X}", index.min().unwrap()),
+            _ => panic!("Invalid memory address: {:#X}", min),
         }
     }
 }

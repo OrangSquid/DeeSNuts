@@ -76,14 +76,14 @@ impl Arm7 {
             let opcode = self.fetch_arm();
             // Clear the bottom 2 bits
             self.decode_arm(opcode);
-            self.registers[15] += 4;
+             self.registers[15] += 4;
         }
     }
 
     fn fetch_arm(&mut self) -> u32 {
         println!("Fetching at {:#08x}", self.registers[15]);
-        let opcode = self.memory.borrow().get_word(self.registers[15]);
-        opcode & 0xFFFF_FFFC
+        let opcode = self.memory.borrow().get_word(self.registers[15] & 0xFFFF_FFFC);
+        opcode
     }
 
     fn fetch_thumb(&mut self) -> u16 {
@@ -426,23 +426,27 @@ impl Arm7 {
     
     fn load_memory(&mut self, base_register: u32, src_register: u32, is_byte: bool) {
         let address = self.registers[src_register as usize];
-        let mut value_to_store = self.memory.borrow().get_word(address);
+        let mut value_to_store = 0;
         if !is_byte {
-            // Is Word aligned
+            value_to_store = self.memory.borrow().get_word(address);
+            // Is not word aligned
             if address % 4 != 0 {
                 value_to_store = self.barrel_shifter(value_to_store, (address & 3) * 8, 3, false);
             }
+        }
+        else {
+            value_to_store = self.memory.borrow().get_byte(address) as u32;
         }
         self.registers[base_register as usize] = value_to_store;
     }
 
     fn store_memory(&mut self, base_register: u32, dst_register: u32, is_byte: bool) {
-        let mut value = self.registers[base_register as usize] as u32;
+        let value = self.registers[base_register as usize] as u32;
         if !is_byte {
-            self.memory.borrow_mut()[dst_register as usize..(dst_register + 4) as usize].copy_from_slice(&value.to_le_bytes());
+            self.memory.borrow_mut().store_word(dst_register, value);
         }
         else {
-            self.memory.borrow_mut()[dst_register as usize] = (value & 0xFF) as u8;
+            self.memory.borrow_mut().store_byte(dst_register, value as u8);
         }
     }
 
@@ -505,7 +509,7 @@ impl Arm7 {
         let ur_mom = u16::to_le_bytes(value_to_store as u16);
         println!("{} {}", i.len(), ur_mom.len());
         match sh {
-            0x20 => self.memory.borrow_mut()[dst_register_value as usize..(dst_register_value + 2) as usize].copy_from_slice(&u16::to_le_bytes(value_to_store as u16)),
+            0x20 => self.memory.borrow_mut().store_halfword(dst_register_value, value_to_store as u16),
             _ => panic!("Something went terribly wrong while storing a halfword")
         }
     }
@@ -568,11 +572,8 @@ impl Arm7 {
                 self.cpsr_register = *self.get_current_saved_psr();
                 self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
             }
-            let mut temp_value: [u8; 4] = [0; 4];
-            for i in 0..4 {
-                temp_value[i] = self.memory.borrow_mut()[base as usize + i];
-            }
-            self.registers[*register as usize] = u32::from_le_bytes(temp_value);
+            let value = self.memory.borrow().get_word(base);
+            self.registers[*register as usize] = value;
             if up {
                 base += 4;
             }
