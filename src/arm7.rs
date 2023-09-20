@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::memory::Memory;
 
 // CPU modes
@@ -25,7 +27,7 @@ const FIQ_BIT: u32 = 0x40;
 const STATE_BIT: u32 = 0x20;
 
 pub struct Arm7 {
-    memory: Memory,
+    memory: Rc<RefCell<Memory>>,
     pub registers: [u32; 16],
     // Current Program Status Register
     pub cpsr_register: u32,
@@ -42,10 +44,10 @@ pub struct Arm7 {
 }
 
 impl Arm7 {
-    pub fn new() -> Arm7 {
+    pub fn new(memory: Rc<RefCell<Memory>>) -> Arm7 {
         // TODO: THE BANKED REGISTERS I HATE IT HERE
         let mut arm7 = Arm7 {
-            memory: Memory::new(),
+            memory,
             registers: [0; 16],
             cpsr_register: SYSTEM_MODE as u32,
             saved_psr: [0; 5],
@@ -62,14 +64,6 @@ impl Arm7 {
         arm7.registers[13] = STACK_SUPERVISOR_START;
         arm7.registers[15] = START_PC;
         arm7
-    }
-
-    pub fn load_bios(&mut self, bios: Vec<u8>) {
-        self.memory.load_bios(bios);
-    }
-
-    pub fn load_rom(&mut self, rom: Vec<u8>) {
-        self.memory.load_rom(rom)
     }
 
     pub fn next(&mut self) {
@@ -90,7 +84,7 @@ impl Arm7 {
         let pc = self.registers[15] as usize;
         let mut opcode_array: [u8; 4] = [0; 4];
         for i in 0..4 {
-            opcode_array[i] = self.memory[pc + i];
+            opcode_array[i] = self.memory.borrow_mut()[pc + i];
         }
         u32::from_le_bytes(opcode_array)
     }
@@ -223,7 +217,7 @@ impl Arm7 {
 
     fn branch(&mut self, link: bool, offset: i32) {
         // Due to prefetching, the PC should be 8 bytes ahead
-        let correct_ofset = ((offset << 8) >> 6) + 8;
+        let correct_ofset = ((offset << 8) >> 6) + 4;
         if link {
             self.registers[14] = self.registers[15]
         }
@@ -435,19 +429,19 @@ impl Arm7 {
     
     fn load_memory(&mut self, base_register: u32, src_register: u32, is_byte: bool) {
         let src_register_value = self.registers[src_register as usize];
-        let mut value_to_store = self.memory[src_register_value as usize] as u32;
+        let mut value_to_store = self.memory.borrow_mut()[src_register_value as usize] as u32;
         if !is_byte {
             // Is Word aligned
             if src_register_value % 4 == 0 {
                 for i in 1..4 {
-                    value_to_store |= (self.memory[(src_register_value + i) as usize] as u32) << (8 * i);
+                    value_to_store |= (self.memory.borrow_mut()[(src_register_value + i) as usize] as u32) << (8 * i);
                 }
             }
             // Is halfword aligned
             else {
-                value_to_store |= (self.memory[(src_register_value + 1) as usize] as u32) << 8;
-                value_to_store |= (self.memory[(src_register_value - 2) as usize] as u32) << 16;
-                value_to_store |= (self.memory[(src_register_value - 1) as usize] as u32) << 24;
+                value_to_store |= (self.memory.borrow_mut()[(src_register_value + 1) as usize] as u32) << 8;
+                value_to_store |= (self.memory.borrow_mut()[(src_register_value - 2) as usize] as u32) << 16;
+                value_to_store |= (self.memory.borrow_mut()[(src_register_value - 1) as usize] as u32) << 24;
             }
         }
         self.registers[base_register as usize] = value_to_store;
@@ -456,18 +450,18 @@ impl Arm7 {
     fn store_memory(&mut self, base_register: u32, dst_register: u32, is_byte: bool) {
         let mut value = self.registers[base_register as usize] as u32;
         if !is_byte {
-            self.memory[dst_register as usize..(dst_register + 4) as usize].copy_from_slice(&value.to_le_bytes());
+            self.memory.borrow_mut()[dst_register as usize..(dst_register + 4) as usize].copy_from_slice(&value.to_le_bytes());
         }
         else {
-            self.memory[dst_register as usize] = (value & 0xFF) as u8;
+            self.memory.borrow_mut()[dst_register as usize] = (value & 0xFF) as u8;
         }
     }
 
     fn halfword_data_transfer(&mut self, opcode: u32) {
         self.registers[15] += 8;
-        let base_register = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        let base = self.registers[((opcode & 0xF_0000) >> 16) as usize];
         self.registers[15] += 4;
-        let mut src_dst_register = self.registers[((opcode & 0xF000) >> 12) as usize];
+        let mut src_dst = self.registers[((opcode & 0xF000) >> 12) as usize];
         self.registers[15] -= 4;
         let offset = match opcode & 0x40_0000 {
             0x40_0000 => opcode & 0xF | (opcode & 0xF00) >> 4,
@@ -477,31 +471,31 @@ impl Arm7 {
         // Pre indexing
         if opcode & 0x100_0000 == 0x100_0000 {
             if opcode & 0x80_0000 == 0x80_0000 {
-                src_dst_register += offset;
+                src_dst += offset;
             }
             else {
-                src_dst_register -= offset;
+                src_dst -= offset;
             }
         }
         // Load from memory
         if opcode & 0x10_0000 == 0x10_0000 {
-            self.load_halfword(base_register, src_dst_register, opcode & 0x60);
+            self.load_halfword(base, src_dst, opcode & 0x60);
         }
         else {
-            self.store_halfword(base_register, src_dst_register, opcode & 0x60)
+            self.store_halfword(base, src_dst, opcode & 0x60)
         }
         // Post Indexing
         if opcode & 0x100_0000 == 0x0 {
             if opcode & 0x80_0000 == 0x80_0000 {
-                src_dst_register += offset;
+                src_dst += offset;
             }
             else {
-                src_dst_register -= offset;
+                src_dst -= offset;
             }
         }
         // Write Back
         if opcode & 0x20_0000 == 0x20_0000 {
-            self.registers[((opcode & 0xF000) >> 12) as usize] = src_dst_register;
+            self.registers[((opcode & 0xF000) >> 12) as usize] = src_dst;
         }
         self.registers[15] -= 8;
     }
@@ -509,7 +503,7 @@ impl Arm7 {
     fn load_halfword(&mut self, base_register: u32, src_register: u32, sh: u32) {
         let mut opcode_array: [u8; 4] = [0; 4];
         for i in 0..4 {
-            opcode_array[i] = self.memory[(self.registers[src_register as usize] as usize + i) as usize];
+            opcode_array[i] = self.memory.borrow_mut()[(self.registers[src_register as usize] as usize + i) as usize];
         }
         let value = u32::from_le_bytes(opcode_array);
         match sh {
@@ -520,11 +514,11 @@ impl Arm7 {
         }
     }
 
-    fn store_halfword(&mut self, base_register: u32, dst_register: u32, sh: u32) {
-        let dst_register_value = self.registers[dst_register as usize];
-        let value_to_store = self.registers[base_register as usize];
+    fn store_halfword(&mut self, value_to_store: u32, dst_register_value: u32, sh: u32) {
+        let i = dst_register_value as usize..(dst_register_value + 2) as usize;
+        println!("{}", i.len());
         match sh {
-            0x20 => self.memory[dst_register_value as usize..(dst_register_value + 2) as usize].copy_from_slice(&u16::to_le_bytes(value_to_store as u16)),
+            0x20 => self.memory.borrow_mut()[dst_register_value as usize..(dst_register_value + 2) as usize].copy_from_slice(&u16::to_le_bytes(value_to_store as u16)),
             _ => panic!("Something went terribly wrong while storing a halfword")
         }
     }
@@ -589,7 +583,7 @@ impl Arm7 {
             }
             let mut temp_value: [u8; 4] = [0; 4];
             for i in 0..4 {
-                temp_value[i] = self.memory[base as usize + i];
+                temp_value[i] = self.memory.borrow_mut()[base as usize + i];
             }
             self.registers[*register as usize] = u32::from_le_bytes(temp_value);
             if up {
@@ -604,7 +598,7 @@ impl Arm7 {
     fn store_multiple(&mut self, mut base: u32, registers: &Vec<u8>, up: bool) {
         for register in registers {
             let value_to_store = self.registers[*register as usize];
-            self.memory[base as usize..(base + 4) as usize].copy_from_slice(&u32::to_le_bytes(value_to_store as u32));
+            self.memory.borrow_mut()[base as usize..(base + 4) as usize].copy_from_slice(&u32::to_le_bytes(value_to_store as u32));
             if up {
                 base += 4;
             }
