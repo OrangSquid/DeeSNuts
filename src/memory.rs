@@ -51,21 +51,44 @@ impl Memory {
     pub fn load_rom(&mut self, rom: Vec<u8>) {
         self.rom = rom;
     }
+
+    pub fn get_byte(&self, address: u32) -> u8 {
+        self[address as usize]
+    }
+
+    pub fn get_halfword(&self, address: u32) -> u16 {
+        let address_idx = address as usize;
+        let mut bytes = [0; 2];
+        for i in 0..2 {
+            bytes[i] = self[address_idx + i];
+        }
+        u16::from_le_bytes(bytes)
+    }
+
+    pub fn get_word(&self, address: u32) -> u32 {
+        let address_idx = address as usize;
+        let mut bytes = [0; 4];
+        for i in 0..4 {
+            bytes[i] = self[address_idx + i];
+        }
+        u32::from_le_bytes(bytes)
+    }
 }
 
 impl Index<usize> for Memory {
     type Output = u8;
 
     fn index(&self, index: usize) -> &Self::Output {
+        let usable_bits = index & 0xFF_FFFF;
         match index {
-            BIOS_ADDRESS..=BIOS_END => &self.bios[index & 0xFF_FFFF],
-            EWRAM_ADDRESS..=EWRAM_END => &self.ewram[index & 0xFF_FFFF],
-            IWRAM_ADDRESS..=IWRAM_END => &self.iwram[index & 0xFF_FFFF],
-            IO_REGISTERS..=IO_REGISTERS_END => &self.io_registers[index & 0xFF_FFFF],
-            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &self.pallete_ram[index & 0xFF_FFFF],
-            VRAM_ADDRESS..=VRAM_END => &self.vram[index & 0xFF_FFFF],
-            OAM_ADRESS..=OAM_END =>  &self.oam[index & 0xFF_FFFF],
-            ROM_ADDRESS..=ROM_END => &self.rom[index & 0xFF_FFFF],
+            BIOS_ADDRESS..=BIOS_END => &self.bios[usable_bits],
+            EWRAM_ADDRESS..=EWRAM_END => &self.ewram[usable_bits],
+            IWRAM_ADDRESS..=IWRAM_END => &self.iwram[usable_bits],
+            IO_REGISTERS..=IO_REGISTERS_END => &self.io_registers[usable_bits],
+            PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &self.pallete_ram[usable_bits],
+            VRAM_ADDRESS..=VRAM_END => &self.vram[usable_bits],
+            OAM_ADRESS..=OAM_END =>  &self.oam[usable_bits],
+            ROM_ADDRESS..=ROM_END => &self.rom[usable_bits],
             SRAM_ADDRESS..=SRAM_END => todo!(),
             _ => panic!("Invalid memory address: {:#X}", index),
         }

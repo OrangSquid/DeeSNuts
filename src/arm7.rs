@@ -74,6 +74,7 @@ impl Arm7 {
         // ARM MODE
         else {
             let opcode = self.fetch_arm();
+            // Clear the bottom 2 bits
             self.decode_arm(opcode);
             self.registers[15] += 4;
         }
@@ -81,12 +82,8 @@ impl Arm7 {
 
     fn fetch_arm(&mut self) -> u32 {
         println!("Fetching at {:#08x}", self.registers[15]);
-        let pc = self.registers[15] as usize;
-        let mut opcode_array: [u8; 4] = [0; 4];
-        for i in 0..4 {
-            opcode_array[i] = self.memory.borrow_mut()[pc + i];
-        }
-        u32::from_le_bytes(opcode_array)
+        let opcode = self.memory.borrow().get_word(self.registers[15]);
+        opcode & 0xFFFF_FFFC
     }
 
     fn fetch_thumb(&mut self) -> u16 {
@@ -428,20 +425,12 @@ impl Arm7 {
     }
     
     fn load_memory(&mut self, base_register: u32, src_register: u32, is_byte: bool) {
-        let src_register_value = self.registers[src_register as usize];
-        let mut value_to_store = self.memory.borrow_mut()[src_register_value as usize] as u32;
+        let address = self.registers[src_register as usize];
+        let mut value_to_store = self.memory.borrow().get_word(address);
         if !is_byte {
             // Is Word aligned
-            if src_register_value % 4 == 0 {
-                for i in 1..4 {
-                    value_to_store |= (self.memory.borrow_mut()[(src_register_value + i) as usize] as u32) << (8 * i);
-                }
-            }
-            // Is halfword aligned
-            else {
-                value_to_store |= (self.memory.borrow_mut()[(src_register_value + 1) as usize] as u32) << 8;
-                value_to_store |= (self.memory.borrow_mut()[(src_register_value - 2) as usize] as u32) << 16;
-                value_to_store |= (self.memory.borrow_mut()[(src_register_value - 1) as usize] as u32) << 24;
+            if address % 4 != 0 {
+                value_to_store = self.barrel_shifter(value_to_store, (address & 3) * 8, 3, false);
             }
         }
         self.registers[base_register as usize] = value_to_store;
@@ -482,7 +471,7 @@ impl Arm7 {
             self.load_halfword(base, src_dst, opcode & 0x60);
         }
         else {
-            self.store_halfword(base, src_dst, opcode & 0x60)
+            self.store_halfword(src_dst, base, opcode & 0x60)
         }
         // Post Indexing
         if opcode & 0x100_0000 == 0x0 {
@@ -501,22 +490,20 @@ impl Arm7 {
     }
 
     fn load_halfword(&mut self, base_register: u32, src_register: u32, sh: u32) {
-        let mut opcode_array: [u8; 4] = [0; 4];
-        for i in 0..4 {
-            opcode_array[i] = self.memory.borrow_mut()[(self.registers[src_register as usize] as usize + i) as usize];
-        }
-        let value = u32::from_le_bytes(opcode_array);
+        let address = self.registers[src_register as usize];
+        let value = self.memory.borrow().get_halfword(address);
         match sh {
-            0x20 => self.registers[base_register as usize] = value & 0xFFFF,
+            0x20 => self.registers[base_register as usize] = value as u32,
             0x40 => self.registers[base_register as usize] = (((value & 0xFF) as i8) as i32) as u32,
-            0x60 => self.registers[base_register as usize] = (((value & 0xFFFF) as i16) as i32) as u32,
+            0x60 => self.registers[base_register as usize] = ((value as i16) as i32) as u32,
             _ => panic!("Something went terribly wrong while loading a halfword")
         }
     }
 
     fn store_halfword(&mut self, value_to_store: u32, dst_register_value: u32, sh: u32) {
         let i = dst_register_value as usize..(dst_register_value + 2) as usize;
-        println!("{}", i.len());
+        let ur_mom = u16::to_le_bytes(value_to_store as u16);
+        println!("{} {}", i.len(), ur_mom.len());
         match sh {
             0x20 => self.memory.borrow_mut()[dst_register_value as usize..(dst_register_value + 2) as usize].copy_from_slice(&u16::to_le_bytes(value_to_store as u16)),
             _ => panic!("Something went terribly wrong while storing a halfword")

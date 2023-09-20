@@ -52,5 +52,6 @@ fn main() {
             }
         }
         gba.next();
+        gba.display();
     }
 }

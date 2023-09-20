@@ -20,7 +20,7 @@ impl Gba {
         Gba {
             memory: Rc::clone(&memory),
             cpu: Arm7::new(Rc::clone(&memory)),
-            video: Video::new(window),
+            video: Video::new(window, Rc::clone(&memory)),
         }
     }
 
@@ -34,5 +34,9 @@ impl Gba {
 
     pub fn next(&mut self) {
         self.cpu.next();
+    }
+
+    pub fn display(&mut self) {
+        self.video.display();
     }
 }
