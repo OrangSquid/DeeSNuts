@@ -34,8 +34,7 @@ impl Arm7 {
                 let shift_type = (opcode & 0x60) >> 5;
                 operand_2 = self.barrel_shifter(value, operand_2, shift_type, false);
             }
-        }
-        else {
+        } else {
             panic!();
         }
         let operand_1 = self.registers[((opcode & 0xF_0000) >> 16) as usize];
@@ -169,8 +168,8 @@ impl Arm7 {
         if (operand_1 | operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0 {
             self.cpsr_register |= CARRY_FLAG;
         }
-        if (operand_1 & operand_2) & 0x8000_0000 == 0 && result & 0x8000_0000 == 0x8000_0000
-            || (operand_1 & operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0
+        if /* (operand_1 & operand_2) & 0x8000_0000 == 0 && result & 0x8000_0000 == 0x8000_0000
+            || */ (operand_1 & operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0
         {
             self.cpsr_register |= OVERFLOW_FLAG;
         }
@@ -187,29 +186,30 @@ impl Arm7 {
     }
 
     fn subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_1.overflowing_sub(operand_2).0;
+        self.registers[destination_register as usize] = operand_1.wrapping_sub(operand_2);
         self.registers[destination_register as usize]
     }
 
     fn right_subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_2.overflowing_sub(operand_1).0;
+        self.registers[destination_register as usize] = operand_2.wrapping_sub(operand_1);
         self.registers[destination_register as usize]
     }
 
     fn add(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_2.overflowing_add(operand_1).0;
+        self.registers[destination_register as usize] = operand_2.wrapping_add(operand_1);
         self.registers[destination_register as usize]
     }
 
     fn add_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
         self.registers[destination_register as usize] =
-            operand_1.overflowing_add(operand_2.overflowing_add((self.cpsr_register & CARRY_FLAG) >> 29).0).0;
+            operand_1.wrapping_add(operand_2.wrapping_add((self.cpsr_register & CARRY_FLAG) >> 29));
         self.registers[destination_register as usize]
     }
 
     fn subtract_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] =
-            operand_1.overflowing_sub(operand_2.overflowing_add((self.cpsr_register & CARRY_FLAG) >> 29).0).0.overflowing_sub(1).0;
+        self.registers[destination_register as usize] = operand_1
+            .wrapping_sub(operand_2.wrapping_add((self.cpsr_register & CARRY_FLAG) >> 29))
+            .wrapping_sub(1);
         self.registers[destination_register as usize]
     }
 
@@ -219,8 +219,9 @@ impl Arm7 {
         destination_register: u32,
         operand_2: u32,
     ) -> u32 {
-        self.registers[destination_register as usize] =
-        operand_2.overflowing_sub(operand_1.overflowing_add((self.cpsr_register & CARRY_FLAG) >> 29).0).0.overflowing_sub(1).0;
+        self.registers[destination_register as usize] = operand_2
+            .wrapping_sub(operand_1.wrapping_add((self.cpsr_register & CARRY_FLAG) >> 29))
+            .wrapping_sub(1);
         self.registers[destination_register as usize]
     }
 
@@ -233,11 +234,11 @@ impl Arm7 {
     }
 
     fn subtract_cmp(operand_1: u32, operand_2: u32) -> u32 {
-        operand_1 - operand_2
+        operand_1.wrapping_sub(operand_2)
     }
 
     fn add_cmn(operand_1: u32, operand_2: u32) -> u32 {
-        operand_1 + operand_2
+        operand_1.wrapping_add(operand_2)
     }
 
     fn orr(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {

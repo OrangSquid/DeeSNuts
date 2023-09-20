@@ -8,10 +8,12 @@ use crate::arm7::Arm7;
 use crate::memory::Memory;
 use crate::video::Video;
 
+const REFRESH_RATE: f64 = 1.0 / 60.0;
+
 pub struct Gba {
     memory: Rc<RefCell<Memory>>,
     cpu: Arm7,
-    video: Video,
+    video: Video
 }
 
 impl Gba {
