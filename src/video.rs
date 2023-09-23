@@ -39,7 +39,7 @@ impl Video {
             240,
             160,
             480,
-            sdl2::pixels::PixelFormatEnum::RGBA5551,
+            sdl2::pixels::PixelFormatEnum::BGR555,
         ).unwrap();
         self.window.copy(&self.texture_creator.create_texture_from_surface(screen).unwrap(), None, None).unwrap();
         self.window.present();

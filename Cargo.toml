@@ -8,3 +8,6 @@ edition = "2021"
 [dependencies]
 sdl2 = "0.35"
 num = "0.4"
+
+[dev.release]
+debug = 1

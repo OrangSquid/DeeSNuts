@@ -41,4 +41,8 @@ impl Gba {
     pub fn display(&mut self) {
         self.video.display();
     }
+
+    pub fn lamo(&mut self) {
+        self.cpu.cpsr_register;
+    }
 }

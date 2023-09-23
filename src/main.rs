@@ -40,6 +40,8 @@ fn main() {
         _ => panic!(),
     }
 
+    let mut cycles = 0;
+
     'running: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -52,6 +54,10 @@ fn main() {
             }
         }
         gba.next();
-        gba.display();
+        cycles += 1;
+        if cycles >= 5000 {
+            gba.display();
+            cycles = 0;
+        }
     }
 }

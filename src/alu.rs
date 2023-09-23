@@ -168,9 +168,7 @@ impl Arm7 {
         if (operand_1 | operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0 {
             self.cpsr_register |= CARRY_FLAG;
         }
-        if /* (operand_1 & operand_2) & 0x8000_0000 == 0 && result & 0x8000_0000 == 0x8000_0000
-            || */ (operand_1 & operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0
-        {
+        if (operand_1 & operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0 {
             self.cpsr_register |= OVERFLOW_FLAG;
         }
     }
