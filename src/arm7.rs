@@ -89,7 +89,6 @@ pub struct Arm7 {
 
 impl Arm7 {
     pub fn new(memory: Rc<RefCell<Memory>>) -> Arm7 {
-        // TODO: THE BANKED REGISTERS I HATE IT HERE
         let mut arm7 = Arm7 {
             memory,
             registers: [0; 16],
@@ -453,22 +452,22 @@ impl Arm7 {
             }
         }
         // Load from memory
-        if opcode & 0x10_0000 == 0x10_0000 {
+        if load {
             self.load_memory(
                 address,
                 src_dst_register,
-                opcode & 0x40_0000 == 0x40_0000,
+                byte,
             );
         } else {
             self.store_memory(
                 address,
                 src_dst_register.clone(),
-                opcode & 0x40_0000 == 0x40_0000,
+                byte,
             )
         }
         // Post Indexing
-        if opcode & 0x100_0000 == 0x0 {
-            if opcode & 0x80_0000 == 0x80_0000 {
+        if !pre_indexing {
+            if up {
                 address += offset;
             } else {
                 address -= offset;

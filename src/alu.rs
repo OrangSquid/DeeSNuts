@@ -50,6 +50,14 @@ impl Arm7 {
         )
     }
 
+    #[inline(always)]
+    fn check_carry(&mut self, operand: u32, value: u32, carry_bit: u32) {
+        let carry_bit = (1 as u32) << (31 - value);
+        if (operand & carry_bit != 0) && value != 0 {
+            self.cpsr_register |= CARRY_FLAG;
+        }
+    }
+
     // TODO make the checks for carry out a seperate functiion
     pub fn barrel_shifter(
         &mut self,
@@ -60,30 +68,21 @@ impl Arm7 {
     ) -> u32 {
         match shift_type {
             0x0 => {
-                let carry_bit = (1 as u32) << (31 - value);
-                if (operand & carry_bit != 0) && value != 0 {
-                    self.cpsr_register |= CARRY_FLAG;
-                }
+                self.check_carry(operand, value, (1 as u32) << (31 - value));
                 operand << value
             } // LSL
             0x1 => {
                 if value == 0 && !register_specified_shift {
                     value = 32;
                 }
-                let carry_bit = (1 as u32) << (value - 1);
-                if operand & carry_bit != 0 && value != 0 {
-                    self.cpsr_register |= CARRY_FLAG;
-                }
+                self.check_carry(operand, value, (1 as u32) << (value - 1));
                 operand >> value
             } // LSR
             0x2 => {
                 if value == 0 && !register_specified_shift {
                     value = 32;
                 }
-                let carry_bit = (1 as u32) << (value - 1);
-                if operand & carry_bit != 0 && value != 0 {
-                    self.cpsr_register |= CARRY_FLAG;
-                }
+                self.check_carry(operand, value, (1 as u32) << (value - 1));
                 (operand as i32 >> value) as u32
             } // ASR
             0x3 => {
@@ -95,10 +94,7 @@ impl Arm7 {
                     operand | carry_in
                 } else {
                     if value != 0 {
-                        let carry_bit = (1 as u32) << (value - 1);
-                        if operand & carry_bit != 0 {
-                            self.cpsr_register |= CARRY_FLAG;
-                        }
+                        self.check_carry(operand, value, (1 as u32) << (value - 1));
                     }
                     operand.rotate_right(value)
                 }
