@@ -2,6 +2,7 @@ use crate::arm7::Arm7;
 use crate::arm7::CARRY_FLAG;
 use crate::arm7::OVERFLOW_FLAG;
 use crate::arm7::ZERO_FLAG;
+use crate::check_bit;
 
 impl Arm7 {
     pub fn alu_command(&mut self, opcode: u32) {
@@ -58,7 +59,6 @@ impl Arm7 {
         }
     }
 
-    // TODO make the checks for carry out a seperate functiion
     pub fn barrel_shifter(
         &mut self,
         mut value: u32,
@@ -111,7 +111,7 @@ impl Arm7 {
         destination_register: u32,
         operand_2: u32,
     ) {
-        let result: u32 = match opcode {
+        let (result, carry, overflow) = match opcode {
             0x0 => self.and(operand_1, destination_register, operand_2),
             0x1 => self.exclusive_or(operand_1, destination_register, operand_2),
             0x2 => self.subtract(operand_1, destination_register, operand_2),
@@ -131,12 +131,10 @@ impl Arm7 {
             _ => panic!(),
         };
         if set_condition_codes && destination_register != 15 {
+            self.set_logical_operations_cpsr_flags(result);
             match opcode {
-                0x0 | 0x1 | 0x8 | 0x9 | 0xC | 0xD | 0xE | 0xF => {
-                    self.set_logical_operations_cpsr_flags(result)
-                }
                 0x2 | 0x3 | 0x4 | 0x5 | 0x6 | 0x7 | 0xA | 0xB => {
-                    self.set_arithmetic_operations_cpsr_flags(operand_1, result, operand_2)
+                    self.set_arithmetic_operations_cpsr_flags(carry, overflow);
                 }
                 _ => (),
             }
@@ -146,65 +144,57 @@ impl Arm7 {
     }
 
     fn set_logical_operations_cpsr_flags(&mut self, result: u32) {
-        self.cpsr_register &= 0xCFFF_FFFF;
+        self.cpsr_register &= 0x3FFF_FFFF;
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
         self.cpsr_register |= result & 0x8000_0000;
     }
 
-    fn set_arithmetic_operations_cpsr_flags(
-        &mut self,
-        operand_1: u32,
-        result: u32,
-        operand_2: u32,
-    ) {
-        self.cpsr_register &= 0xFFF_FFFF;
-        self.set_logical_operations_cpsr_flags(result);
-        if (operand_1 | operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0 {
+    fn set_arithmetic_operations_cpsr_flags(&mut self, carry: bool, overflow: bool) {
+        self.cpsr_register &= 0xCFFF_FFFF;
+        if carry {
             self.cpsr_register |= CARRY_FLAG;
         }
-        if (operand_1 & operand_2) & 0x8000_0000 == 0x8000_0000 && result & 0x8000_0000 == 0 {
+        if overflow {
             self.cpsr_register |= OVERFLOW_FLAG;
         }
     }
 
-    fn and(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
+    fn and(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         self.registers[destination_register as usize] = operand_1 & operand_2;
-        self.registers[destination_register as usize]
+        (self.registers[destination_register as usize], false, false)
     }
 
-    fn exclusive_or(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
+    fn exclusive_or(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         self.registers[destination_register as usize] = operand_1 ^ operand_2;
-        self.registers[destination_register as usize]
+        (self.registers[destination_register as usize], false, false)
     }
 
-    fn subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_1.wrapping_sub(operand_2);
-        self.registers[destination_register as usize]
+    fn subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
+        let operand_2 = !operand_2 + 1;
+        self.add(operand_1, destination_register, operand_2)
     }
 
-    fn right_subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_2.wrapping_sub(operand_1);
-        self.registers[destination_register as usize]
+    fn right_subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
+        let operand_1 = !operand_1 + 1;
+        self.add(operand_1, destination_register, operand_2)
     }
 
-    fn add(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_2.wrapping_add(operand_1);
-        self.registers[destination_register as usize]
+    fn add(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
+        let (result, carry) = operand_1.overflowing_add(operand_2);
+        self.registers[destination_register as usize] = result;
+        (result, carry, (check_bit!(operand_1, 31) == check_bit!(operand_2, 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
     }
 
-    fn add_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] =
-            operand_1.wrapping_add(operand_2.wrapping_add((self.cpsr_register & CARRY_FLAG) >> 29));
-        self.registers[destination_register as usize]
+    fn add_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
+        let operand_2 = operand_2.wrapping_add((check_bit!(self.cpsr_register, 29)) as u32);
+        self.add(operand_1, destination_register, operand_2)
     }
 
-    fn subtract_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
-        self.registers[destination_register as usize] = operand_1
-            .wrapping_sub(operand_2.wrapping_add((self.cpsr_register & CARRY_FLAG) >> 29))
-            .wrapping_sub(1);
-        self.registers[destination_register as usize]
+    fn subtract_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
+        let operand_2 = (!operand_2 + 1).wrapping_sub(1 * (check_bit!(self.cpsr_register, 29)) as u32);
+        self.add(operand_1, destination_register, operand_2)
     }
 
     fn right_subtract_carry(
@@ -212,46 +202,47 @@ impl Arm7 {
         operand_1: u32,
         destination_register: u32,
         operand_2: u32,
-    ) -> u32 {
-        self.registers[destination_register as usize] = operand_2
-            .wrapping_sub(operand_1.wrapping_add((self.cpsr_register & CARRY_FLAG) >> 29))
-            .wrapping_sub(1);
-        self.registers[destination_register as usize]
+    ) -> (u32, bool, bool) {
+        let operand_1 = (!operand_1 + 1).wrapping_sub(1 * (check_bit!(self.cpsr_register, 29)) as u32);
+        self.add(operand_1, destination_register, operand_2)
     }
 
-    fn tst_and(operand_1: u32, operand_2: u32) -> u32 {
-        operand_1 & operand_2
+    fn tst_and(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
+        (operand_1 & operand_2, false, false)
     }
 
-    fn exclusive_or_teq(operand_1: u32, operand_2: u32) -> u32 {
-        operand_1 ^ operand_2
+    fn exclusive_or_teq(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
+        (operand_1 ^ operand_2, false, false)
     }
 
-    fn subtract_cmp(operand_1: u32, operand_2: u32) -> u32 {
-        operand_1.wrapping_sub(operand_2)
+    fn subtract_cmp(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
+        let operand_2 = !operand_2 + 1;
+        let (result, carry) = operand_1.overflowing_add(operand_2);
+        (result, carry, (check_bit!(operand_1, 31) == check_bit!(operand_2, 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
     }
 
-    fn add_cmn(operand_1: u32, operand_2: u32) -> u32 {
-        operand_1.wrapping_add(operand_2)
+    fn add_cmn(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
+        let (result, carry) = operand_1.overflowing_add(operand_2);
+        (result, carry, (check_bit!(operand_1, 31) == check_bit!(operand_2, 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
     }
 
-    fn orr(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
+    fn orr(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         self.registers[destination_register as usize] = operand_1 & operand_2;
-        self.registers[destination_register as usize]
+        (self.registers[destination_register as usize], false, false)
     }
 
-    fn mov(&mut self, destination_register: u32, operand_2: u32) -> u32 {
+    fn mov(&mut self, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         self.registers[destination_register as usize] = operand_2;
-        self.registers[destination_register as usize]
+        (self.registers[destination_register as usize], false, false)
     }
 
-    fn bit_clear(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> u32 {
+    fn bit_clear(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         self.registers[destination_register as usize] = operand_1 & !operand_2;
-        self.registers[destination_register as usize]
+        (self.registers[destination_register as usize], false, false)
     }
 
-    fn move_not(&mut self, destination_register: u32, operand_2: u32) -> u32 {
+    fn move_not(&mut self, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         self.registers[destination_register as usize] = !operand_2;
-        self.registers[destination_register as usize]
+        (self.registers[destination_register as usize], false, false)
     }
 }

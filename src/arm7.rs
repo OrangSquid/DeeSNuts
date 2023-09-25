@@ -63,13 +63,14 @@ const fn build_condition_lut() -> [bool; 256] {
     temp
 }
 
+#[macro_export]
 macro_rules! check_bit {
     ($opcode:expr, $bit:expr) => {
         $opcode & (1 << $bit) == (1 << $bit)
     };
 }
 
-// Fix visibility problems
+// TODO Fix visibility problems
 pub struct Arm7 {
     memory: Rc<RefCell<Memory>>,
     pub registers: [u32; 16],
@@ -124,7 +125,7 @@ impl Arm7 {
     }
 
     fn fetch_arm(&mut self) -> u32 {
-        //println!("Fetching at {:#08x}", self.registers[15]);
+        //!("Fetching at {:#08x}", self.registers[15]);
         let address = self.registers[15] & 0xFFFF_FFFC;
         self
             .memory
@@ -140,10 +141,10 @@ impl Arm7 {
     // of it at a later date
     fn decode_arm(&mut self, opcode: u32) {
         //println!("Decoding {:#08x}", opcode);
-        if !CONDITION_LUT[(opcode >> 24 | self.cpsr_register >> 28) as usize] {
+        if !CONDITION_LUT[(((opcode >> 24) & 0xF0) | self.cpsr_register >> 28) as usize] {
             return;
         }
-        let lmao = Instant::now();
+        //let lmao = Instant::now();
         match opcode & (0x3 << 26) {
             0x0 => match opcode & 0x90 {
                 0x0 | 0x80 => self.sr_or_alu(opcode),
@@ -174,7 +175,7 @@ impl Arm7 {
             },
             _ => panic!("Undefinied instruction"),
         }
-       /*  println!(
+        /* println!(
             "execute: {}",
             Instant::now().duration_since(lmao).as_secs_f64()
         ); */
@@ -507,9 +508,9 @@ impl Arm7 {
 
     fn halfword_data_transfer(&mut self, opcode: u32) {
         self.registers[15] += 8;
-        let base = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        let mut address = self.get_rn_register_value(opcode);
         self.registers[15] += 4;
-        let mut src_dst = self.registers[((opcode & 0xF000) >> 12) as usize];
+        let src_dst_register = Self::get_rd_register_number(opcode);
         let offset = match opcode & 0x40_0000 {
             0x40_0000 => opcode & 0xF | (opcode & 0xF00) >> 4,
             0x0 => self.registers[(opcode & 0xF) as usize],
@@ -517,51 +518,52 @@ impl Arm7 {
                 "Something went terribly wrong while deducing offset type in halfword transfer"
             ),
         };
+        
         // Pre indexing
         if opcode & 0x100_0000 == 0x100_0000 {
             if opcode & 0x80_0000 == 0x80_0000 {
-                src_dst += offset;
+                address += offset;
             } else {
-                src_dst -= offset;
+                address -= offset;
             }
         }
         // Load from memory
         if opcode & 0x10_0000 == 0x10_0000 {
-            self.load_halfword(base, src_dst, opcode & 0x60);
+            self.load_halfword(address, src_dst_register, opcode & 0x60);
         } else {
-            self.store_halfword(src_dst, base, opcode & 0x60)
+            self.store_halfword(address, src_dst_register, opcode & 0x60)
         }
         // Post Indexing
         if opcode & 0x100_0000 == 0x0 {
             if opcode & 0x80_0000 == 0x80_0000 {
-                src_dst += offset;
+                address += offset;
             } else {
-                src_dst -= offset;
+                address -= offset;
             }
         }
         // Write Back
         if opcode & 0x20_0000 == 0x20_0000 {
-            self.registers[((opcode & 0xF000) >> 12) as usize] = src_dst;
+            self.registers[Self::get_rn_register_number(opcode)] = address;
         }
         self.registers[15] -= 12;
     }
 
-    fn load_halfword(&mut self, base_register: u32, src_register: u32, sh: u32) {
-        let address = self.registers[src_register as usize];
+    fn load_halfword(&mut self, address: u32, dst_register: usize, sh: u32) {
         let value = self.memory.borrow().get_halfword(address);
         match sh {
-            0x20 => self.registers[base_register as usize] = value as u32,
-            0x40 => self.registers[base_register as usize] = (((value & 0xFF) as i8) as i32) as u32,
-            0x60 => self.registers[base_register as usize] = ((value as i16) as i32) as u32,
+            0x20 => self.registers[dst_register] = value as u32,
+            0x40 => self.registers[dst_register] = (((value & 0xFF) as i8) as i32) as u32,
+            0x60 => self.registers[dst_register] = ((value as i16) as i32) as u32,
             _ => panic!("Something went terribly wrong while loading a halfword"),
         }
     }
 
-    fn store_halfword(&mut self, value_to_store: u32, dst_register_value: u32, sh: u32) {
+    fn store_halfword(&mut self, address: u32, src_register: usize, sh: u32) {
+        let value = self.registers[src_register] as u16;
         if sh & 0x20 == 0x20 {
             self.memory
                 .borrow_mut()
-                .store_halfword(dst_register_value, value_to_store as u16);
+                .store_halfword(address, value);
         } else {
             panic!("Something went terribly wrong while storing a halfword");
         }

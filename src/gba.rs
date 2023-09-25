@@ -8,12 +8,11 @@ use crate::arm7::Arm7;
 use crate::memory::Memory;
 use crate::video::Video;
 
-const REFRESH_RATE: f64 = 1.0 / 60.0;
-
 pub struct Gba {
     memory: Rc<RefCell<Memory>>,
     cpu: Arm7,
-    video: Video
+    video: Video,
+    clock: u64
 }
 
 impl Gba {
@@ -23,6 +22,7 @@ impl Gba {
             memory: Rc::clone(&memory),
             cpu: Arm7::new(Rc::clone(&memory)),
             video: Video::new(window, Rc::clone(&memory)),
+            clock: 0
         }
     }
 
@@ -34,8 +34,16 @@ impl Gba {
         self.memory.borrow_mut().load_rom(rom);
     }
 
+    fn tick(&mut self) {
+        self.clock += 1;
+        if self.clock == 280896 {
+            self.display();
+        }
+    }
+
     pub fn next(&mut self) {
         self.cpu.next();
+        self.tick();
     }
 
     pub fn display(&mut self) {

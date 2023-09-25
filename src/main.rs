@@ -7,7 +7,6 @@ pub mod alu;
 pub mod arm7;
 pub mod gba;
 pub mod memory;
-pub mod utils;
 pub mod video;
 
 fn main() {
@@ -40,8 +39,6 @@ fn main() {
         _ => panic!(),
     }
 
-    let mut cycles = 0;
-
     'running: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -54,10 +51,5 @@ fn main() {
             }
         }
         gba.next();
-        cycles += 1;
-        if cycles >= 5000 {
-            gba.display();
-            cycles = 0;
-        }
     }
 }

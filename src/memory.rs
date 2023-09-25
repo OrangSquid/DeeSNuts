@@ -1,4 +1,4 @@
-use std::ops::{Index, Range, IndexMut};
+use std::{ops::{Index, Range, IndexMut}, time::Instant};
 
 const BIOS_ADDRESS: usize = 0x00000000;
 const BIOS_END: usize = 0x00003FFF;
@@ -133,7 +133,7 @@ impl Index<Range<usize>> for Memory {
             OAM_ADRESS..=OAM_END => &self.oam[min..=max],
             ROM_ADDRESS..=ROM_END => &self.rom[min..=max],
             SRAM_ADDRESS..=SRAM_END => todo!(),
-            _ => panic!("Invalid memory address: {:#X}", min),
+            _ => panic!("Invalid memory address: {:#X}", index.start),
         }
     }
 }
@@ -152,7 +152,7 @@ impl IndexMut<Range<usize>> for Memory {
             OAM_ADRESS..=OAM_END => &mut self.oam[min..=max],
             ROM_ADDRESS..=ROM_END => &mut self.rom[min..=max],
             SRAM_ADDRESS..=SRAM_END => todo!(),
-            _ => panic!("Invalid memory address: {:#X}", min),
+            _ => panic!("Invalid memory address: {:#X}", index.start),
         }
     }
 }

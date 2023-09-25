@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 sdl2 = "0.35"
 num = "0.4"
+cargo-asm = "0.1.16"
 
 [dev.release]
 debug = 1
