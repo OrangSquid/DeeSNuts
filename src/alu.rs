@@ -58,13 +58,7 @@ impl Arm7 {
         }
     }
 
-    pub fn barrel_shifter(
-        &mut self,
-        mut value: u32,
-        mut operand: u32,
-        shift_type: u32,
-        register_specified_shift: bool,
-    ) -> u32 {
+    pub fn barrel_shifter(&mut self, mut value: u32, mut operand: u32, shift_type: u32, register_specified_shift: bool) -> u32 {
         match shift_type {
             0x0 => {
                 self.check_carry(operand, value, (1u32) << (31 - value));

@@ -184,26 +184,32 @@ impl Arm7 {
     fn decode_thumb(&mut self, opcode: u16) {}
 
     fn switch_modes(&mut self, old_mode: u32) {
-        let (banked, slice) = match old_mode {
-            USER_MODE | SYSTEM_MODE => (&mut self.user_banked, &mut self.registers[13..15]),
-            FIQ_MODE => (&mut self.fiq_hi_banked, &mut self.registers[13..15]),
-            SUPERVISOR_MODE => (&mut self.supervisor_banked, &mut self.registers[13..15]),
-            ABORT_MODE => (&mut self.abort_banked, &mut self.registers[13..15]),
-            IRQ_MODE => (&mut self.irq_banked, &mut self.registers[13..15]),
-            UNDEFINED_MODE => (&mut self.undefinied_banked, &mut self.registers[13..15]),
+        match old_mode {
+            USER_MODE | SYSTEM_MODE => self.user_banked.copy_from_slice(&mut self.registers[13..15]),
+            FIQ_MODE => {
+                // Swap beacuse the other modes all share R8 through R12
+                self.registers[8..13].swap_with_slice(&mut self.fiq_lo_banked);
+                self.fiq_hi_banked.copy_from_slice(&mut self.registers[13..15]);
+            }
+            SUPERVISOR_MODE => self.supervisor_banked.copy_from_slice(&mut self.registers[13..15]),
+            ABORT_MODE => self.abort_banked.copy_from_slice(&mut self.registers[13..15]),
+            IRQ_MODE => self.irq_banked.copy_from_slice(&mut self.registers[13..15]),
+            UNDEFINED_MODE => self.undefinied_banked.copy_from_slice(&mut self.registers[13..15]),
             _ => panic!("Unrecognized mode"),
-        };
-        banked.copy_from_slice(&mut self.registers[13..15]);
-        let (banked, slice) = match self.cpsr_register & 0x1F {
-            USER_MODE | SYSTEM_MODE => (&self.user_banked, &mut self.registers[13..15]),
-            FIQ_MODE => (&self.fiq_hi_banked, &mut self.registers[13..15]),
-            SUPERVISOR_MODE => (&self.supervisor_banked, &mut self.registers[13..15]),
-            ABORT_MODE => (&self.abort_banked, &mut self.registers[13..15]),
-            IRQ_MODE => (&self.irq_banked, &mut self.registers[13..15]),
-            UNDEFINED_MODE => (&self.undefinied_banked, &mut self.registers[13..15]),
-            _ => panic!("Unrecognized mode"),
-        };
-        slice.copy_from_slice(banked);
+        }
+        match self.cpsr_register & 0x1F {
+            USER_MODE | SYSTEM_MODE => self.registers[13..15].copy_from_slice(&self.user_banked),
+            FIQ_MODE => {
+                // Swap beacuse the other modes all share R8 through R12
+                self.fiq_lo_banked.swap_with_slice(&mut self.registers[8..13]);
+                self.registers[13..15].copy_from_slice(&self.fiq_hi_banked);
+            }
+            SUPERVISOR_MODE => self.registers[13..15].copy_from_slice(&self.supervisor_banked),
+            ABORT_MODE => self.registers[13..15].copy_from_slice(&self.abort_banked),
+            IRQ_MODE => self.registers[13..15].copy_from_slice(&self.irq_banked),
+            UNDEFINED_MODE => self.registers[13..15].copy_from_slice(&self.undefinied_banked),
+            _ => panic!("Unrecognized mode")
+        }
     }
 
     fn sr_or_alu(&mut self, opcode: u32) {
