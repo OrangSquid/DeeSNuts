@@ -63,7 +63,7 @@ const fn build_condition_lut() -> [bool; 256] {
     temp
 }
 
-#[macro_export]
+ #[macro_export]
 macro_rules! check_bit {
     ($opcode:expr, $bit:expr) => {
         $opcode & (1 << $bit) == (1 << $bit)
@@ -272,13 +272,13 @@ impl Arm7 {
 
     fn get_current_saved_psr(&mut self) -> &mut u32 {
         match self.cpsr_register & 0x1F {
-            USER_MODE => panic!("No saved PSR in user mode"),
+            USER_MODE => &mut self.cpsr_register,
             FIQ_MODE => &mut self.saved_psr[0],
             IRQ_MODE => &mut self.saved_psr[1],
             SUPERVISOR_MODE => &mut self.saved_psr[2],
             ABORT_MODE => &mut self.saved_psr[3],
             UNDEFINED_MODE => &mut self.saved_psr[4],
-            SYSTEM_MODE => panic!("No saved PSR in system mode"),
+            SYSTEM_MODE => &mut self.cpsr_register,
             _ => panic!("CPU is in an unrecognized mode"),
         }
     }
@@ -302,21 +302,21 @@ impl Arm7 {
 
     fn msr(&mut self, opcode: u32) {
         let mask: u32 = match opcode & (0xF << 16) {
-            0x1 => 0xFF,
-            0x2 => 0xFF00,
-            0x3 => 0xFFFF,
-            0x4 => 0xFF0000,
-            0x5 => 0xFF00FF,
-            0x6 => 0xFFFF00,
-            0x7 => 0xFFFFFF,
-            0x8 => 0xFF000000,
-            0x9 => 0xFF0000FF,
-            0xA => 0xFF00FF00,
-            0xB => 0xFF00FFFF,
-            0xC => 0xFFFF0000,
-            0xD => 0xFFFF00FF,
-            0xE => 0xFFFFFF00,
-            0xF => 0xFFFFFFFF,
+            0x1_0000 => 0xFF,
+            0x2_0000 => 0xFF00,
+            0x3_0000 => 0xFFFF,
+            0x4_0000 => 0xFF0000,
+            0x5_0000 => 0xFF00FF,
+            0x6_0000 => 0xFFFF00,
+            0x7_0000 => 0xFFFFFF,
+            0x8_0000 => 0xFF000000,
+            0x9_0000 => 0xFF0000FF,
+            0xA_0000 => 0xFF00FF00,
+            0xB_0000 => 0xFF00FFFF,
+            0xC_0000 => 0xFFFF0000,
+            0xD_0000 => 0xFFFF00FF,
+            0xE_0000 => 0xFFFFFF00,
+            0xF_0000 => 0xFFFFFFFF,
             _ => panic!(),
         };
         let operand_2: u32 = 
@@ -395,7 +395,7 @@ impl Arm7 {
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
-        if result & 0x8000_0000_0000_0000 == 0x8000_0000_0000_0000 {
+        if check_bit!(result, 63) {
             self.cpsr_register |= SIGN_FLAG;
         }
     }
@@ -405,7 +405,7 @@ impl Arm7 {
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
-        if result & 0x8000_0000 == 0x8000_0000 {
+        if check_bit!(result, 31) {
             self.cpsr_register |= SIGN_FLAG;
         }
     }
@@ -482,16 +482,16 @@ impl Arm7 {
     }
 
     fn load_memory(&mut self, address: u32, dst_register: usize, is_byte: bool) {
-        let mut value_to_load = 0;
-        if !is_byte {
-            value_to_load = self.memory.borrow().get_word(address);
-            // Is not word aligned
-            if address % 4 != 0 {
-                value_to_load = self.barrel_shifter(value_to_load, (address & 3) * 8, 3, false);
-            }
+        let value_to_load = if is_byte {
+            self.memory.borrow()[address as usize] as u32
         } else {
-            value_to_load = self.memory.borrow().get_byte(address) as u32;
-        }
+            let value = self.memory.borrow().get_word(address);
+            if address % 4 != 0 {
+                self.barrel_shifter(value, (address & 3) * 8, 3, false)
+            } else {
+                value
+            }
+        };
         self.registers[dst_register] = value_to_load;
     }
 
@@ -570,10 +570,15 @@ impl Arm7 {
     }
 
     fn block_data_transfer(&mut self, opcode: u32) {
-        let mut base_register = self.registers[((opcode & 0xF_0000) >> 16) as usize];
+        let mut address = self.get_rn_register_value(opcode);
         let mut register_mask = opcode & 0xFFFF;
         let mut registers = Vec::new();
         registers.reserve(register_mask.count_ones() as usize);
+        let pre_indexing = check_bit!(opcode, 24);
+        let up = check_bit!(opcode, 23);
+        let psr_user_bit = check_bit!(opcode, 22);
+        let write_back = check_bit!(opcode, 21);
+        let load = check_bit!(opcode, 20);
         for i in 0u8..16u8 {
             if register_mask & 0x1 == 0x1 {
                 registers.push(i);
@@ -581,85 +586,77 @@ impl Arm7 {
             register_mask = register_mask >> 1;
         }
         // Pre Indexing
-        if opcode & 0x100_0000 == 0x100_0000 {
-            if opcode & 0x80_0000 == 0x80_0000 {
-                base_register += 4;
+        if pre_indexing {
+            if up {
+                address += 4;
             } else {
-                base_register -= 4;
+                address -= 4;
             }
         }
         // Store old mode if S bit is set to transfer user mode registers
-        let mut old_mode = 0;
-        if opcode & 0x40_0000 == 0x40_0000 && self.cpsr_register & USER_MODE != USER_MODE {
-            old_mode = self.cpsr_register & 0x1F;
+        let old_mode = self.cpsr_register & 0x1F;
+        if psr_user_bit && self.cpsr_register & USER_MODE != USER_MODE {
             self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
             self.switch_modes(old_mode)
         }
         // Load Multiple
-        if opcode & 0x10_0000 == 0x10_0000 {
-            self.load_multiple(
-                base_register,
-                &registers,
-                opcode & 0x80_0000 == 0x80_0000,
-                old_mode,
-            );
+        if load {
+            self.load_multiple(address, &registers, up, old_mode);
         }
         // Store Multiple
         else {
-            self.store_multiple(base_register, &registers, opcode & 0x80_0000 == 0x80_0000);
+            self.store_multiple(address, &registers, up);
         }
         // Restore old mode
-        if opcode & 0x40_0000 == 0x40_0000 {
+        if psr_user_bit {
             self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
             self.switch_modes(USER_MODE)
         }
         // Write Back
-        if opcode & 0x20_0000 == 0x20_0000 {
-            if opcode & 0x80_0000 == 0x80_0000 {
-                self.registers[((opcode & 0xF_0000) >> 16) as usize] = registers.len() as u32 * 4;
+        if write_back {
+            if write_back {
+                self.registers[Self::get_rd_register_number(opcode)] = registers.len() as u32 * 4;
             } else {
-                self.registers[((opcode & 0xF_0000) >> 16) as usize] = registers.len() as u32 * 4;
+                self.registers[Self::get_rd_register_number(opcode)] = registers.len() as u32 * 4;
             }
         }
     }
 
-    fn load_multiple(&mut self, mut base: u32, registers: &[u8], up: bool, old_mode: u32) {
+    fn load_multiple(&mut self, mut address: u32, registers: &[u8], up: bool, old_mode: u32) {
         for register in registers {
             if *register == 15 {
                 self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
                 self.cpsr_register = *self.get_current_saved_psr();
                 self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
             }
-            let value = self.memory.borrow().get_word(base);
+            let value = self.memory.borrow().get_word(address);
             self.registers[*register as usize] = value;
             if up {
-                base += 4;
+                address += 4;
             } else {
-                base -= 4;
+                address -= 4;
             }
         }
     }
 
-    fn store_multiple(&mut self, mut base: u32, registers: &[u8], up: bool) {
+    fn store_multiple(&mut self, mut address: u32, registers: &[u8], up: bool) {
         for register in registers {
             let value_to_store = self.registers[*register as usize];
-            self.memory.borrow_mut().store_word(base, value_to_store);
+            self.memory.borrow_mut().store_word(address, value_to_store);
             if up {
-                base += 4;
+                address += 4;
             } else {
-                base -= 4;
+                address -= 4;
             }
         }
     }
 
     fn single_data_swap(&mut self, opcode: u32) {
-        let base_register = &mut self.registers[((opcode & 0xF_0000) >> 16) as usize];
-        let dst_register = (opcode & 0xF000) >> 12;
-        let src_register = opcode & 0xF;
-        let is_byte = opcode & 0x40_0000 == 0x40_0000;
-        // Don't mind the switch in the names
-        // It's kinda confusing but I hope it works
-        /* self.load_memory(dst_register, base_register, is_byte);
-        self.store_memory(src_register, base_register.clone(), is_byte); */
+        let address = self.get_rn_register_value(opcode);
+        let dst_register = Self::get_rd_register_number(opcode);
+        let src_register = Self::get_rm_register_number(opcode);
+        let is_byte = check_bit!(opcode, 22);
+        self.load_memory(address, dst_register, is_byte);
+        self.store_memory(address, src_register, is_byte);
     }
 }
