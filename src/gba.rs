@@ -35,19 +35,13 @@ impl Gba {
     }
 
     fn tick(&mut self) {
-        self.clock += 1;
-        if self.clock == 280896 {
-            self.display();
-        }
+        self.clock = self.clock.wrapping_add(1);
     }
 
     pub fn next(&mut self) {
         self.cpu.next();
+        self.video.tick();
         self.tick();
-    }
-
-    pub fn display(&mut self) {
-        self.video.display();
     }
 
     pub fn lamo(&mut self) {
