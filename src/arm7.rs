@@ -125,7 +125,7 @@ impl Arm7 {
     }
 
     fn fetch_arm(&mut self) -> u32 {
-        //!("Fetching at {:#08x}", self.registers[15]);
+        //println!("Fetching at {:#08x}", self.registers[15]);
         let address = self.registers[15] & 0xFFFF_FFFC;
         self
             .memory
@@ -327,20 +327,20 @@ impl Arm7 {
         };
         let operand_2: u32 = 
         // Is immediate
-        if opcode & 0x200_0000 == 0x200_0000 {
+        if check_bit!(opcode, 25) {
             let shift = ((opcode & 0xF00) >> 8) * 2;
             (opcode & 0xFF).rotate_right(shift).rotate_right(shift)
         }
         // Is in register
         else {
-            self.registers[(opcode & 0xF) as usize]
+            self.get_rm_register_value(opcode)
         };
         
         if self.cpsr_register & 0x1F == USER_MODE && mask & 0xFF == 0xFF {
             panic!("Tried to set control flags in user mode")
         }
         let old_mode = self.cpsr_register & 0x1F;
-        self.cpsr_register = operand_2 & mask;
+        self.cpsr_register = (operand_2 & mask) | (self.cpsr_register & !mask);
         if old_mode != self.cpsr_register & 0x1F {
             self.switch_modes(old_mode);
         }
@@ -354,6 +354,7 @@ impl Arm7 {
         }
     }
 
+    // TODO NEXT BUG TO SQUASH
     fn multiply(&mut self, opcode: u32) {
         let mut operand_1 = 0;
         // If accumulate
@@ -579,24 +580,34 @@ impl Arm7 {
         let mut address = self.get_rn_register_value(opcode);
         let mut register_mask = opcode & 0xFFFF;
         let mut registers = Vec::new();
-        registers.reserve(register_mask.count_ones() as usize);
+        let number_registers = register_mask.count_ones();
+        registers.reserve(number_registers as usize);
         let pre_indexing = check_bit!(opcode, 24);
         let up = check_bit!(opcode, 23);
         let psr_user_bit = check_bit!(opcode, 22);
         let write_back = check_bit!(opcode, 21);
         let load = check_bit!(opcode, 20);
+        let mut final_address = 0;
         for i in 0u8..16u8 {
             if register_mask & 0x1 == 0x1 {
                 registers.push(i);
             }
             register_mask = register_mask >> 1;
         }
-        // Pre Indexing
         if pre_indexing {
             if up {
-                address += 4;
+                final_address += address + 4 * number_registers;
+                address += 4
             } else {
-                address -= 4;
+                final_address += address - 4 * number_registers;
+                address = final_address
+            }
+        } else {
+            if up {
+                final_address += address + 4 * number_registers;
+            } else {
+                final_address += address - 4 * number_registers;
+                address = final_address + 4;
             }
         }
         // Store old mode if S bit is set to transfer user mode registers
@@ -607,11 +618,11 @@ impl Arm7 {
         }
         // Load Multiple
         if load {
-            self.load_multiple(address, &registers, up, old_mode);
+            self.load_multiple(address, &registers, old_mode);
         }
         // Store Multiple
         else {
-            self.store_multiple(address, &registers, up);
+            self.store_multiple(address, &registers);
         }
         // Restore old mode
         if psr_user_bit {
@@ -621,14 +632,14 @@ impl Arm7 {
         // Write Back
         if write_back {
             if write_back {
-                self.registers[Self::get_rd_register_number(opcode)] = registers.len() as u32 * 4;
+                self.registers[Self::get_rn_register_number(opcode)] = final_address;
             } else {
-                self.registers[Self::get_rd_register_number(opcode)] = registers.len() as u32 * 4;
+                self.registers[Self::get_rn_register_number(opcode)] = final_address;
             }
         }
     }
 
-    fn load_multiple(&mut self, mut address: u32, registers: &[u8], up: bool, old_mode: u32) {
+    fn load_multiple(&mut self, mut address: u32, registers: &[u8], old_mode: u32) {
         for register in registers {
             if *register == 15 {
                 self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
@@ -637,23 +648,15 @@ impl Arm7 {
             }
             let value = self.memory.borrow().get_word(address);
             self.registers[*register as usize] = value;
-            if up {
-                address += 4;
-            } else {
-                address -= 4;
-            }
+            address += 4;
         }
     }
 
-    fn store_multiple(&mut self, mut address: u32, registers: &[u8], up: bool) {
+    fn store_multiple(&mut self, mut address: u32, registers: &[u8]) {
         for register in registers {
             let value_to_store = self.registers[*register as usize];
             self.memory.borrow_mut().store_word(address, value_to_store);
-            if up {
-                address += 4;
-            } else {
-                address -= 4;
-            }
+            address += 4;
         }
     }
 
