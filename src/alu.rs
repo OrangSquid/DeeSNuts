@@ -215,7 +215,7 @@ impl Arm7 {
     }
 
     fn orr(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
-        self.registers[destination_register as usize] = operand_1 & operand_2;
+        self.registers[destination_register as usize] = operand_1 | operand_2;
         (self.registers[destination_register as usize], false, false)
     }
 

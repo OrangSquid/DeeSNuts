@@ -157,9 +157,12 @@ impl Arm7 {
                         0x0 => self.multiply(opcode),
                         0x80_0000 => self.multiply_long(opcode),
                         0x100_0000 => self.single_data_swap(opcode),
-                        _ => panic!(),
+                        _ => panic!("Undefinied instruction"),
                     },
-                    _ => self.halfword_data_transfer(opcode)
+                    _ => match opcode & 0x200_0000 {
+                        0x0 => self.halfword_data_transfer(opcode),
+                        _ => self.sr_or_alu(opcode)
+                    }
                 },
                 _ => panic!("Undefinied instruction"),
             },
