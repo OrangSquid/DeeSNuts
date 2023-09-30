@@ -159,11 +159,7 @@ impl Arm7 {
                         0x100_0000 => self.single_data_swap(opcode),
                         _ => panic!(),
                     },
-                    _ => {
-                        if opcode & 0x40_0000 == 0x40_0000 {
-                            self.halfword_data_transfer(opcode);
-                        }
-                    }
+                    _ => self.halfword_data_transfer(opcode)
                 },
                 _ => panic!("Undefinied instruction"),
             },
@@ -354,21 +350,23 @@ impl Arm7 {
         }
     }
 
-    // TODO NEXT BUG TO SQUASH
     fn multiply(&mut self, opcode: u32) {
-        let mut operand_1 = 0;
+        let operand_1 =
         // If accumulate
-        if opcode & 0x20_0000 == 0x20_0000 {
-            operand_1 = self.registers[(opcode & 0xF000) as usize];
-        }
-        let operand_2 = self.registers[(opcode & 0xF00) as usize];
-        let operand_3 = self.registers[(opcode & 0xF) as usize];
-        self.registers[(opcode & 0xF_0000) as usize] =
-            operand_3.wrapping_mul(operand_2).wrapping_add(operand_1);
+        if check_bit!(opcode, 21) {
+            self.get_rd_register_value(opcode)
+        } else {
+            0
+        };
+        let operand_2 = self.get_rs_register_value(opcode);
+        let operand_3 = self.get_rm_register_value(opcode);
+        let dest_register = Self::get_rn_register_number(opcode);
+        let result = operand_3.wrapping_mul(operand_2).wrapping_add(operand_1);
         // If set condition
-        if opcode & 0x10_0000 == 0x10_0000 {
-            self.set_multiply_flags(self.registers[(opcode & 0xF_0000) as usize]);
+        if check_bit!(opcode, 20) {
+            self.set_multiply_flags(result);
         }
+        self.registers[dest_register] = result;
     }
 
     fn multiply_long(&mut self, opcode: u32) {
@@ -518,14 +516,10 @@ impl Arm7 {
         let mut address = self.get_rn_register_value(opcode);
         self.registers[15] += 4;
         let src_dst_register = Self::get_rd_register_number(opcode);
-        let offset = match opcode & 0x40_0000 {
-            0x40_0000 => opcode & 0xF | (opcode & 0xF00) >> 4,
-            0x0 => self.registers[(opcode & 0xF) as usize],
-            _ => panic!(
-                "Something went terribly wrong while deducing offset type in halfword transfer"
-            ),
+        let offset = match check_bit!(opcode, 22) {
+            true => opcode & 0xF | (opcode & 0xF00) >> 4,
+            false => self.get_rm_register_value(opcode)
         };
-        
         // Pre indexing
         if opcode & 0x100_0000 == 0x100_0000 {
             if opcode & 0x80_0000 == 0x80_0000 {

@@ -43,8 +43,4 @@ impl Gba {
         self.video.tick();
         self.tick();
     }
-
-    pub fn lamo(&mut self) {
-        self.cpu.cpsr_register;
-    }
 }
