@@ -117,12 +117,13 @@ impl Arm7 {
         self.output_registers();
         // THUMB MODE
         if self.cpsr_register & STATE_BIT == STATE_BIT {
+            let opcode = self.fetch_thumb();
+            self.decode_thumb(opcode);
             self.registers[15] += 2;
         }
         // ARM MODE
         else {
             let opcode = self.fetch_arm();
-            // Clear the bottom 2 bits
             self.decode_arm(opcode);
             self.registers[15] += 4;
         }
@@ -147,7 +148,11 @@ impl Arm7 {
     }
 
     fn fetch_thumb(&mut self) -> u16 {
-        0
+        //println!("Fetching at {:#08x}", self.registers[15]);
+        self
+            .memory
+            .borrow()
+            .get_halfword(self.registers[15] & 0xFFFF_FFFE)
     }
 
     // TODO: a single data transfer opcode might be an undefinied instruction, should take care
@@ -193,7 +198,79 @@ impl Arm7 {
         ); */
     }
     
-    fn decode_thumb(&mut self, opcode: u16) {}
+    fn decode_thumb(&mut self, opcode: u16) {
+        match opcode & 0xE000 {
+            0x0 => match  opcode & 0x1800 {
+                0x1800 => (),
+                _ => self.convert_move_shifted(opcode)
+            },
+            0x2000 => self.convert_alu_immediate(opcode),
+            0x4000 => match opcode & 0x1000 {
+                0x1000 => (),
+                _ => match opcode & 0x800 {
+                    0x800 => (),
+                    _ => match opcode & 0x400 {
+                        0x400 => self.hi_register_operation(opcode),
+                        _ => ()
+                    }
+                },
+            },
+            0x6000 => (),
+            0x8000 => (),
+            0xA000 => self.load_address(opcode),
+            0xC000 => (),
+            0xE000 => (),
+            _ => panic!("Undefinied instruction"),
+        }
+    }
+
+    fn convert_move_shifted(&mut self, opcode: u16) {
+        let source_register = Self::get_rs_t_register_number(opcode) as u32;
+        let destination_register = (Self::get_rd_t_register_number(opcode) as u32) << 12;
+        let offset = ((opcode << 1) & 0xF80) as u32;
+        let opcode = 0xE1B0_0000 | source_register | destination_register | offset;
+        self.alu_command(opcode);
+    }
+
+    fn convert_alu_immediate(&mut self, opcode: u16) {
+        let src_dst_register = Self::get_rb_t_register_number(opcode) as u32;
+        let alu_opcode = match (opcode >> 11) & 0x2 {
+            0x0 => 0xD,
+            0x1 => 0xA,
+            0x2 => 0x4,
+            0x3 => 0x2,
+            _ => panic!("Undefined opcode")
+        };
+        let offset = opcode & 0xFF;
+        let opcode = 0xE3B0_0000 | (alu_opcode << 21) | (src_dst_register << 16) | (src_dst_register << 12) | offset as u32;
+        self.alu_command(opcode);
+    }
+
+    fn load_address(&mut self, opcode: u16) {
+        self.registers[15] += 4;
+        let source_register = if check_bit!(opcode, 11) { 13 } else { 15 };
+        let destination_register = Self::get_rb_t_register_number(opcode);
+        let offset = ((opcode & 0xFF) << 2) as u32;
+        self.registers[destination_register] = offset + self.registers[source_register];
+        self.registers[15] -= 4;
+    }
+
+    fn hi_register_operation(&mut self, opcode: u16) {
+        let destination_register = ((opcode as u32 >> 4) & 0x8) | Self::get_rd_t_register_number(opcode) as u32;
+        let source_register = ((opcode as u32 >> 3) & 0x8) | Self::get_rs_t_register_number(opcode) as u32;
+        let alu_opcode = match (opcode >> 8) & 0x3 {
+            0x0 => 0x80_0000,
+            0x1 => 0x130_0000,
+            0x2 => 0x1A0_0000,
+            0x3 => {
+                self.branch_and_exchange(source_register);
+                return;
+            }
+            _ => panic!("Undefined opcode")
+        };
+        let opcode = alu_opcode | (destination_register << 16) | (destination_register << 12) | source_register;
+        self.alu_command(opcode);
+    }
 
     fn switch_modes(&mut self, old_mode: u32) {
         match old_mode {
@@ -271,11 +348,40 @@ impl Arm7 {
         self.registers[Self::get_rm_register_number(opcode)]
     }
 
+    #[inline(always)]
+    fn get_ro_t_register_number(opcode: u16) -> usize {
+        ((opcode >> 6) & 0x7) as usize
+    }
+
+    #[inline(always)]
+    fn get_rs_t_register_number(opcode: u16) -> usize {
+        ((opcode >> 3) & 0x7) as usize
+    }
+
+    #[inline(always)]
+    fn get_rd_t_register_number(opcode: u16) -> usize {
+        (opcode & 0x7) as usize
+    }
+
+    #[inline(always)]
+    fn get_rb_t_register_number(opcode: u16) -> usize {
+        ((opcode >> 8) & 0x7) as usize
+    }
+
     fn branch_and_exchange(&mut self, opcode: u32) {
-        let address = self.get_rm_register_value(opcode);
+        let mut address = self.get_rm_register_value(opcode);
+        // Compensation needs to be done because PC is incremented after instruction is executed
+        // THUMB MODE
+        if self.cpsr_register & STATE_BIT != 0 {
+            address -= 2;
+        }
+        // ARM MODE 
+        else {
+            address -= 4;
+        }
         let thumb_bit = address & 0x1;
-        self.cpsr_register = self.cpsr_register | (thumb_bit << 5);
-        self.registers[15] = address;
+        self.cpsr_register = (self.cpsr_register & !STATE_BIT) | (thumb_bit << 5);
+        self.registers[15] = address & !0x1;
     }
 
     fn branch(&mut self, opcode: u32) {
