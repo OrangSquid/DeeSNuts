@@ -93,7 +93,7 @@ impl Arm7 {
         let mut arm7 = Arm7 {
             memory,
             registers: [0; 16],
-            cpsr_register: SYSTEM_MODE as u32,
+            cpsr_register: SYSTEM_MODE | IRQ_BIT | FIQ_BIT,
             saved_psr: [0; 5],
             fiq_lo_banked: [0; 5],
             user_banked: [0; 2],
@@ -104,8 +104,8 @@ impl Arm7 {
             undefinied_banked: [0; 2],
         };
         arm7.registers[13] = STACK_USER_SYSTEM_START;
-        arm7.registers[13] = STACK_IRQ_START;
-        arm7.registers[13] = STACK_SUPERVISOR_START;
+        arm7.irq_banked[0] = STACK_IRQ_START;
+        arm7.supervisor_banked[0] = STACK_SUPERVISOR_START;
         arm7.registers[15] = START_PC;
         arm7
     }
@@ -126,7 +126,6 @@ impl Arm7 {
 
     fn fetch_arm(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        let address = self.registers[15] & 0xFFFF_FFFC;
         self
             .memory
             .borrow()
@@ -172,7 +171,7 @@ impl Arm7 {
                 0x200_0000 => self.branch(opcode),
                 _ => panic!("Undefinied instruction"),
             },
-            _ => panic!("Undefinied instruction"),
+            _ => () //panic!("Undefinied instruction"),
         }
         /* println!(
             "execute: {}",

@@ -2,12 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Check log",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}\\logs\\log_checker.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}\\logs"
+        },
+        {
             "preLaunchTask": "rust: cargo build",
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}\\target\\debug\\DeeSNuts.exe",
-            "args": ["${workspaceFolder}\\bios\\BIOSGBA.ROM", "${workspaceFolder}\\tests\\arm.gba"],
+            "args": [
+                "${workspaceFolder}\\bios\\BIOSGBA.ROM",
+                "${workspaceFolder}\\tests\\arm.gba"
+            ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
