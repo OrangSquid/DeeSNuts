@@ -5,7 +5,7 @@
             "name": "Check log",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}\\logs\\log_checker.py",
+            "program": "${workspaceFolder}\\logs\\log_comparer.py",
             "console": "integratedTerminal",
             "justMyCode": true,
             "cwd": "${workspaceFolder}\\logs"

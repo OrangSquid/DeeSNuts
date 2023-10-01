@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, time::Instant};
+use std::{cell::RefCell, rc::Rc, time::Instant, fs::{File, OpenOptions}, io::{Write, BufWriter}};
 
 use crate::memory::Memory;
 
@@ -52,8 +52,8 @@ const fn build_condition_lut() -> [bool; 256] {
             0x9 => flag_set & CARRY_FLAG == 0 || flag_set & ZERO_FLAG != 0,
             0xA => (flag_set >> 3) == (flag_set & OVERFLOW_FLAG),
             0xB => (flag_set >> 3) != (flag_set & OVERFLOW_FLAG),
-            0xC => flag_set & ZERO_FLAG == 0 && (flag_set >> 3) != (flag_set & OVERFLOW_FLAG),
-            0xD => flag_set & ZERO_FLAG == 0 && (flag_set >> 3) == (flag_set & OVERFLOW_FLAG),
+            0xC => flag_set & ZERO_FLAG == 0 && (flag_set >> 3) == (flag_set & OVERFLOW_FLAG),
+            0xD => flag_set & ZERO_FLAG == ZERO_FLAG || (flag_set >> 3) != (flag_set & OVERFLOW_FLAG),
             0xE => true,
             0xF => true,
             _ => panic!("Condition for opcode is higher than 0xF"),
@@ -86,10 +86,12 @@ pub struct Arm7 {
     abort_banked: [u32; 2],
     irq_banked: [u32; 2],
     undefinied_banked: [u32; 2],
+    log: File
 }
 
 impl Arm7 {
     pub fn new(memory: Rc<RefCell<Memory>>) -> Arm7 {
+        let lmao = OpenOptions::new().write(true).create(true).open("log.bin").unwrap();
         let mut arm7 = Arm7 {
             memory,
             registers: [0; 16],
@@ -102,6 +104,7 @@ impl Arm7 {
             abort_banked: [0; 2],
             irq_banked: [0; 2],
             undefinied_banked: [0; 2],
+            log: lmao
         };
         arm7.registers[13] = STACK_USER_SYSTEM_START;
         arm7.irq_banked[0] = STACK_IRQ_START;
@@ -111,6 +114,7 @@ impl Arm7 {
     }
 
     pub fn next(&mut self) {
+        self.output_registers();
         // THUMB MODE
         if self.cpsr_register & STATE_BIT == STATE_BIT {
             self.registers[15] += 2;
@@ -122,6 +126,16 @@ impl Arm7 {
             self.decode_arm(opcode);
             self.registers[15] += 4;
         }
+    }
+
+    fn output_registers(&mut self) {
+        let spsr = self.get_current_saved_psr().to_owned();
+        let mut lmao = BufWriter::new(&self.log);
+        for i in 0..16 {
+            lmao.write(&self.registers[i].to_le_bytes()).unwrap();
+        }
+        lmao.write( &self.cpsr_register.to_le_bytes()).unwrap();
+        lmao.write( &spsr.to_le_bytes()).unwrap();
     }
 
     fn fetch_arm(&mut self) -> u32 {
@@ -327,7 +341,7 @@ impl Arm7 {
         // Is immediate
         if check_bit!(opcode, 25) {
             let shift = ((opcode & 0xF00) >> 8) * 2;
-            (opcode & 0xFF).rotate_right(shift).rotate_right(shift)
+            (opcode & 0xFF).rotate_right(shift)
         }
         // Is in register
         else {
@@ -614,7 +628,7 @@ impl Arm7 {
         }
         // Load Multiple
         if load {
-            self.load_multiple(address, &registers, old_mode);
+            self.load_multiple(address, &registers, old_mode, psr_user_bit);
         }
         // Store Multiple
         else {
@@ -635,15 +649,14 @@ impl Arm7 {
         }
     }
 
-    fn load_multiple(&mut self, mut address: u32, registers: &[u8], old_mode: u32) {
+    fn load_multiple(&mut self, mut address: u32, registers: &[u8], old_mode: u32, psr_bit: bool) {
         for register in registers {
-            if *register == 15 {
+            if *register == 15 && psr_bit {
                 self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
                 self.cpsr_register = *self.get_current_saved_psr();
                 self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
             }
-            let value = self.memory.borrow().get_word(address);
-            self.registers[*register as usize] = value;
+            self.registers[*register as usize] = self.memory.borrow().get_word(address);
             address += 4;
         }
     }
