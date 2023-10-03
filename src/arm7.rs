@@ -309,62 +309,62 @@ impl Arm7 {
     }
 
     #[inline(always)]
-    fn get_rn_register_number(opcode: u32) -> usize {
+    pub fn get_rn_register_number(opcode: u32) -> usize {
         ((opcode >> 16) & 0xF) as usize
     }
 
     #[inline(always)]
-    fn get_rd_register_number(opcode: u32) -> usize {
+    pub fn get_rd_register_number(opcode: u32) -> usize {
         ((opcode >> 12) & 0xF) as usize
     }
 
     #[inline(always)]
-    fn get_rs_register_number(opcode: u32) -> usize {
+    pub fn get_rs_register_number(opcode: u32) -> usize {
         ((opcode >> 8) & 0xF) as usize
     }
 
     #[inline(always)]
-    fn get_rm_register_number(opcode: u32) -> usize {
+    pub fn get_rm_register_number(opcode: u32) -> usize {
         (opcode & 0xF) as usize
     }
 
     #[inline(always)]
-    fn get_rn_register_value(&self, opcode: u32) -> u32 {
+    pub fn get_rn_register_value(&self, opcode: u32) -> u32 {
         self.registers[Self::get_rn_register_number(opcode)]
     }
 
     #[inline(always)]
-    fn get_rd_register_value(&self, opcode: u32) -> u32 {
+    pub fn get_rd_register_value(&self, opcode: u32) -> u32 {
         self.registers[Self::get_rd_register_number(opcode)]
     }
 
     #[inline(always)]
-    fn get_rs_register_value(&self, opcode: u32) -> u32 {
+    pub fn get_rs_register_value(&self, opcode: u32) -> u32 {
         self.registers[Self::get_rs_register_number(opcode)]
     }
 
     #[inline(always)]
-    fn get_rm_register_value(&self, opcode: u32) -> u32 {
+    pub fn get_rm_register_value(&self, opcode: u32) -> u32 {
         self.registers[Self::get_rm_register_number(opcode)]
     }
 
     #[inline(always)]
-    fn get_ro_t_register_number(opcode: u16) -> usize {
+    pub fn get_ro_t_register_number(opcode: u16) -> usize {
         ((opcode >> 6) & 0x7) as usize
     }
 
     #[inline(always)]
-    fn get_rs_t_register_number(opcode: u16) -> usize {
+    pub fn get_rs_t_register_number(opcode: u16) -> usize {
         ((opcode >> 3) & 0x7) as usize
     }
 
     #[inline(always)]
-    fn get_rd_t_register_number(opcode: u16) -> usize {
+    pub fn get_rd_t_register_number(opcode: u16) -> usize {
         (opcode & 0x7) as usize
     }
 
     #[inline(always)]
-    fn get_rb_t_register_number(opcode: u16) -> usize {
+    pub fn get_rb_t_register_number(opcode: u16) -> usize {
         ((opcode >> 8) & 0x7) as usize
     }
 
@@ -558,13 +558,15 @@ impl Arm7 {
                 // Shift is only done using the least significant byte in the register
                 let value = self.get_rs_register_value(opcode);
                 let shift_type = 0x60;
-                offset = self.barrel_shifter(value, offset, shift_type, true);
+                // SET CONDITIONS CAN OR CANNOT BE TRUE, I HAVE NO FUCKING CLUE
+                offset = self.barrel_shifter(value, offset, shift_type, true, true);
             }
             // Shift is an immediate value
             else {
                 let value = (opcode & 0xF80) >> 7;
                 let shift_type = (opcode & 0x60) >> 5;
-                offset = self.barrel_shifter(value, offset, shift_type, false);
+                // SAME FOR HERE
+                offset = self.barrel_shifter(value, offset, shift_type, false, true);
             }
         }
         // Is immediate value
@@ -614,7 +616,7 @@ impl Arm7 {
         } else {
             let value = self.memory.borrow().get_word(address);
             if address % 4 != 0 {
-                self.barrel_shifter(value, (address & 3) * 8, 3, false)
+                self.barrel_shifter(value, (address & 3) * 8, 3, false, true)
             } else {
                 value
             }
