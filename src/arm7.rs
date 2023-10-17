@@ -135,8 +135,8 @@ impl Arm7 {
         for i in 0..16 {
             lmao.write(&self.registers[i].to_le_bytes()).unwrap();
         }
-        lmao.write( &self.cpsr_register.to_le_bytes()).unwrap();
-        lmao.write( &spsr.to_le_bytes()).unwrap();
+        lmao.write(&self.cpsr_register.to_le_bytes()).unwrap();
+        lmao.write(&spsr.to_le_bytes()).unwrap();
     }
 
     fn fetch_arm(&mut self) -> u32 {
@@ -170,16 +170,16 @@ impl Arm7 {
                     0x12F_FF10 => self.branch_and_exchange(opcode),
                     _ => self.sr_or_alu(opcode),
                 },
-                0x90 => match opcode & 0x60 {
-                    0x0 => match opcode & 0x180_0000 {
-                        0x0 => self.multiply(opcode),
-                        0x80_0000 => self.multiply_long(opcode),
-                        0x100_0000 => self.single_data_swap(opcode),
-                        _ => panic!("Undefinied instruction"),
-                    },
-                    _ => match opcode & 0x200_0000 {
-                        0x0 => self.halfword_data_transfer(opcode),
-                        _ => self.sr_or_alu(opcode)
+                0x90 => match opcode & 0x200_0000 {
+                    0x200_0000 => self.sr_or_alu(opcode),
+                    _ => match opcode & 0x60 {
+                        0x0 => match opcode & 0x180_0000 {
+                            0x0 => self.multiply(opcode),
+                            0x80_0000 => self.multiply_long(opcode),
+                            0x100_0000 => self.single_data_swap(opcode),
+                            _ => panic!("Undefinied instruction"),
+                        },
+                        _ => self.halfword_data_transfer(opcode)
                     }
                 },
                 _ => panic!("Undefinied instruction"),

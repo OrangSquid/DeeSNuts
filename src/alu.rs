@@ -27,7 +27,7 @@ impl Arm7 {
                 self.registers[15] += 4;
                 // Shift is only done using the least significant byte in the register
                 let value = self.get_rs_register_value(opcode) & 0xFF;
-                let shift_type = 0x60;
+                let shift_type = (opcode & 0x60) >> 5;
                 operand_2 = self.barrel_shifter(value, operand_2, shift_type, true, set_condition_codes);
             }
             // Shift is an immediate value
@@ -51,8 +51,8 @@ impl Arm7 {
         )
     }
 
-    #[inline(always)]
     fn check_carry(&mut self, operand: u32, value: u32, carry_bit: u32) {
+        self.cpsr_register &= 0xDFFF_FFFF;
         if (operand & carry_bit != 0) && value != 0 {
             self.cpsr_register |= CARRY_FLAG;
         }
@@ -63,27 +63,28 @@ impl Arm7 {
         let mut new_operand = 0;
         match shift_type {
             0x0 => {
-                carry_bit = (1u32) << (31 - value);
-                new_operand = operand << value
+                carry_bit = (1u32).checked_shl(32u32.wrapping_sub(value)).unwrap_or(0);
+                new_operand = operand.checked_shl(value).unwrap_or(0);
             } // LSL
             0x1 => {
                 if value == 0 && !register_specified_shift {
                     value = 32;
                 }
-                carry_bit = (1u32) << (value - 1);
-                new_operand = operand >> value
+                carry_bit = (1u32).checked_shl(value.wrapping_sub(1)).unwrap_or(0);
+                new_operand = operand.checked_shr(value).unwrap_or(0);
             } // LSR
             0x2 => {
                 if value == 0 && !register_specified_shift {
                     value = 32;
                 }
-                carry_bit = (1u32) << (value - 1);
-                new_operand = (operand as i32 >> value) as u32;
+                carry_bit = (1u32).checked_shl(value.wrapping_sub(1)).unwrap_or(0);
+                new_operand = (operand as i32).checked_shr(value).unwrap_or(operand as i32 >> 31) as u32
             } // ASR
             0x3 => {
                 if value == 0 && !register_specified_shift {
                     let carry_in = (self.cpsr_register & CARRY_FLAG) << 2;
                     if set_condition_codes {
+                        self.cpsr_register &= 0xDFFF_FFFF;
                         let carry_bit = (operand & 0x1) << 29;
                         self.cpsr_register |= carry_bit;
                     }
@@ -91,14 +92,14 @@ impl Arm7 {
                     return operand | carry_in;
                 } else {
                     if value != 0 {
-                        carry_bit = (1u32) << (value - 1);
+                        carry_bit = (1u32).rotate_left(value.wrapping_sub(1));
                     }
                     new_operand = operand.rotate_right(value)
                 }
             } // RRS
             _ => panic!(),
         }
-        if set_condition_codes {
+        if set_condition_codes && value != 0 {
             self.check_carry(operand, value, carry_bit);
         }
         new_operand
@@ -175,13 +176,13 @@ impl Arm7 {
     fn subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         let (result, carry) = operand_1.overflowing_sub(operand_2);
         self.registers[destination_register as usize] = result;
-        (result, !carry, (check_bit!(operand_1, 31) == check_bit!(-(operand_2 as i32), 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
+        (result, !carry, (check_bit!(operand_1, 31) == check_bit!(!operand_2, 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
     }
 
     fn right_subtract(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
         let (result, carry) = operand_2.overflowing_sub(operand_1);
         self.registers[destination_register as usize] = result;
-        (result, !carry, (check_bit!(operand_1, 31) == check_bit!(-(operand_2 as i32), 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
+        (result, !carry, (check_bit!(operand_2, 31) == check_bit!(!operand_1, 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
     }
 
     fn add(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
@@ -196,13 +197,13 @@ impl Arm7 {
     }
 
     fn subtract_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
-        let operand_2 = (!operand_2 + 1).wrapping_sub(1 * (check_bit!(self.cpsr_register, 29)) as u32);
-        self.add(operand_1, destination_register, operand_2)
+        let operand_2 = (operand_2).wrapping_sub(u32::MAX * (!check_bit!(self.cpsr_register, 29)) as u32);
+        self.subtract(operand_1, destination_register, operand_2)
     }
 
     fn right_subtract_carry(&mut self, operand_1: u32, destination_register: u32, operand_2: u32) -> (u32, bool, bool) {
-        let operand_1 = (!operand_1 + 1).wrapping_sub(1 * (check_bit!(self.cpsr_register, 29)) as u32);
-        self.add(operand_1, destination_register, operand_2)
+        let operand_1 = (operand_1).wrapping_sub(u32::MAX * (!check_bit!(self.cpsr_register, 29)) as u32);
+        self.right_subtract(operand_1, destination_register, operand_2)
     }
 
     fn tst_and(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
@@ -214,8 +215,8 @@ impl Arm7 {
     }
 
     fn subtract_cmp(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
-        let (result, carry) = operand_2.overflowing_sub(operand_1);
-        (result, !carry, (check_bit!(operand_1, 31) == check_bit!(-(operand_2 as i32), 31)) && (check_bit!(operand_1, 31)) != check_bit!(result, 31))
+        let (result, carry) = operand_1.overflowing_sub(operand_2);
+        (result, !carry, check_bit!(result, 31))
     }
 
     fn add_cmn(operand_1: u32, operand_2: u32) -> (u32, bool, bool) {
