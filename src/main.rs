@@ -3,11 +3,11 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::{env, fs};
 
-pub mod alu;
-pub mod arm7;
-pub mod gba;
-pub mod memory;
-pub mod video;
+mod arm7;
+mod gba;
+mod memory;
+mod video;
+mod utils;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

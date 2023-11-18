@@ -1,81 +1,17 @@
-use std::{cell::RefCell, rc::Rc, time::Instant, fs::{File, OpenOptions}, io::{Write, BufWriter}};
+use std::{cell::RefCell, rc::Rc, fs::{File, OpenOptions}, io::{Write, BufWriter}};
 
 use crate::memory::Memory;
+use crate::arm7::constants::*;
+use crate::arm7::lut::condition_lut;
+use crate::check_bit;
 
-// CPU modes
-const USER_MODE: u32 = 0x10;
-const FIQ_MODE: u32 = 0x11;
-const IRQ_MODE: u32 = 0x12;
-const SUPERVISOR_MODE: u32 = 0x13;
-const ABORT_MODE: u32 = 0x17;
-const UNDEFINED_MODE: u32 = 0x1B;
-const SYSTEM_MODE: u32 = 0x1F;
+const CONDITION_LUT: [bool; 256] = condition_lut();
 
-const START_PC: u32 = 0x800_0000;
-
-const STACK_USER_SYSTEM_START: u32 = 0x300_7F00;
-const STACK_IRQ_START: u32 = 0x300_7FA0;
-const STACK_SUPERVISOR_START: u32 = 0x0300_7FE0;
-
-// Position of the bits in the CPSR register
-pub const SIGN_FLAG: u32 = 0x8000_0000;
-pub const ZERO_FLAG: u32 = 0x4000_0000;
-pub const CARRY_FLAG: u32 = 0x2000_0000;
-pub const OVERFLOW_FLAG: u32 = 0x1000_0000;
-const IRQ_BIT: u32 = 0x80;
-const FIQ_BIT: u32 = 0x40;
-const STATE_BIT: u32 = 0x20;
-const CONDITION_LUT: [bool; 256] = build_condition_lut();
-
-const fn build_condition_lut() -> [bool; 256] {
-    const SIGN_FLAG: u8 = 0x8;
-    const ZERO_FLAG: u8 = 0x4;
-    const CARRY_FLAG: u8 = 0x2;
-    const OVERFLOW_FLAG: u8 = 0x1;
-
-    let mut temp = [false; 256];
-    let mut last_index = 0;
-
-    while last_index != 256 {
-        let condition_code = ((last_index & 0xF0) >> 4) as u8;
-        let flag_set = (last_index & 0xF) as u8;
-        temp[last_index] = match condition_code {
-            0x0 => flag_set & ZERO_FLAG != 0,
-            0x1 => flag_set & ZERO_FLAG == 0,
-            0x2 => flag_set & CARRY_FLAG != 0,
-            0x3 => flag_set & CARRY_FLAG == 0,
-            0x4 => flag_set & SIGN_FLAG != 0,
-            0x5 => flag_set & SIGN_FLAG == 0,
-            0x6 => flag_set & OVERFLOW_FLAG != 0,
-            0x7 => flag_set & OVERFLOW_FLAG == 0,
-            0x8 => flag_set & (CARRY_FLAG | ZERO_FLAG) == CARRY_FLAG,
-            0x9 => flag_set & CARRY_FLAG == 0 || flag_set & ZERO_FLAG != 0,
-            0xA => (flag_set >> 3) == (flag_set & OVERFLOW_FLAG),
-            0xB => (flag_set >> 3) != (flag_set & OVERFLOW_FLAG),
-            0xC => flag_set & ZERO_FLAG == 0 && (flag_set >> 3) == (flag_set & OVERFLOW_FLAG),
-            0xD => flag_set & ZERO_FLAG == ZERO_FLAG || (flag_set >> 3) != (flag_set & OVERFLOW_FLAG),
-            0xE => true,
-            0xF => true,
-            _ => panic!("Condition for opcode is higher than 0xF"),
-        };
-        last_index += 1;
-    }
-    temp
-}
-
- #[macro_export]
-macro_rules! check_bit {
-    ($opcode:expr, $bit:expr) => {
-        $opcode & (1 << $bit) == (1 << $bit)
-    };
-}
-
-// TODO Fix visibility problems
-pub struct Arm7 {
+pub struct Cpu {
     memory: Rc<RefCell<Memory>>,
-    pub registers: [u32; 16],
+    pub(in crate::arm7) registers: [u32; 16],
     // Current Program Status Register
-    pub cpsr_register: u32,
+    pub(in crate::arm7) cpsr_register: u32,
     // Each u32 is a banked spsr (Saved Program Status Register)
     saved_psr: [u32; 5],
     // The banked out registers when switched out of user/system mode
@@ -89,10 +25,10 @@ pub struct Arm7 {
     log: File
 }
 
-impl Arm7 {
-    pub fn new(memory: Rc<RefCell<Memory>>) -> Arm7 {
+impl Cpu {
+    pub fn new(memory: Rc<RefCell<Memory>>) -> Cpu {
         let lmao = OpenOptions::new().write(true).create(true).open("log.bin").unwrap();
-        let mut arm7 = Arm7 {
+        let mut arm7 = Cpu {
             memory,
             registers: [0; 16],
             cpsr_register: SYSTEM_MODE | IRQ_BIT | FIQ_BIT,

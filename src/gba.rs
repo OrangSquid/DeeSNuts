@@ -4,13 +4,13 @@ use std::rc::Rc;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 
-use crate::arm7::Arm7;
+use crate::arm7::cpu::Cpu;
 use crate::memory::Memory;
 use crate::video::Video;
 
 pub struct Gba {
     memory: Rc<RefCell<Memory>>,
-    cpu: Arm7,
+    cpu: Cpu,
     video: Video,
     clock: u64
 }
@@ -20,7 +20,7 @@ impl Gba {
         let memory = Rc::new(RefCell::new(Memory::new()));
         Gba {
             memory: Rc::clone(&memory),
-            cpu: Arm7::new(Rc::clone(&memory)),
+            cpu: Cpu::new(Rc::clone(&memory)),
             video: Video::new(window, Rc::clone(&memory)),
             clock: 0
         }

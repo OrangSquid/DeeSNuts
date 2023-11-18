@@ -3,15 +3,6 @@
 version = 3
 
 [[package]]
-name = "DeeSNuts"
-version = "0.1.0"
-dependencies = [
- "cargo-asm",
- "num",
- "sdl2",
-]
-
-[[package]]
 name = "ansi_term"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -81,6 +72,15 @@ dependencies = [
  "textwrap",
  "unicode-width",
  "vec_map",
+]
+
+[[package]]
+name = "dees_nuts"
+version = "0.1.0"
+dependencies = [
+ "cargo-asm",
+ "num",
+ "sdl2",
 ]
 
 [[package]]

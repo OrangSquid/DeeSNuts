@@ -1,4 +1,4 @@
-use std::{ops::{Index, Range, IndexMut}, time::Instant};
+use std::ops::{Index, Range, IndexMut};
 
 const BIOS_ADDRESS: usize = 0x00000000;
 const BIOS_END: usize = 0x00003FFF;

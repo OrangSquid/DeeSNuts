@@ -1,10 +1,9 @@
-use crate::arm7::Arm7;
-use crate::arm7::CARRY_FLAG;
-use crate::arm7::OVERFLOW_FLAG;
-use crate::arm7::ZERO_FLAG;
 use crate::check_bit;
 
-impl Arm7 {
+use crate::arm7::constants::*;
+use crate::arm7::cpu::Cpu;
+
+impl Cpu {
     pub fn alu_command(&mut self, opcode: u32) {
         // prefetch compensation
         let current_pc = self.registers[15];
