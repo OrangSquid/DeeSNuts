@@ -61,9 +61,6 @@ impl Memory {
     }
 
     pub fn get_word(&self, address: u32) -> u32 {
-        if address == 134226704 {
-            println!("{}", address);
-        }
         u32::from_le_bytes(self[address as usize..address as usize + 4].try_into().unwrap())
     }
 

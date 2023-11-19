@@ -1,17 +1,25 @@
-use std::{cell::RefCell, rc::Rc, fs::{File, OpenOptions}, io::{Write, BufWriter}};
+use std::{ cell::RefCell, rc::Rc, fs::{ File, OpenOptions }, io::{ Write, BufWriter } };
 
-use crate::memory::Memory;
-use crate::arm7::constants::*;
-use crate::arm7::lut::condition_lut;
-use crate::check_bit;
+use crate::{ memory::Memory, check_bit, get_register_number_at };
+
+use super::{constants::*, lut};
+use super::lut::{
+    ShiftType,
+    HalfwordTransferType,
+    Instruction,
+    Operand2Type,
+    condition_lut,
+    instruction_lut,
+};
 
 const CONDITION_LUT: [bool; 256] = condition_lut();
+const INSTRUCTION_LUT: [Instruction; 4096] = instruction_lut();
 
 pub struct Cpu {
     memory: Rc<RefCell<Memory>>,
-    pub(in crate::arm7) registers: [u32; 16],
+    pub(super) registers: [u32; 16],
     // Current Program Status Register
-    pub(in crate::arm7) cpsr_register: u32,
+    pub(super) cpsr_register: u32,
     // Each u32 is a banked spsr (Saved Program Status Register)
     saved_psr: [u32; 5],
     // The banked out registers when switched out of user/system mode
@@ -22,7 +30,7 @@ pub struct Cpu {
     abort_banked: [u32; 2],
     irq_banked: [u32; 2],
     undefinied_banked: [u32; 2],
-    log: File
+    log: File,
 }
 
 impl Cpu {
@@ -40,7 +48,7 @@ impl Cpu {
             abort_banked: [0; 2],
             irq_banked: [0; 2],
             undefinied_banked: [0; 2],
-            log: lmao
+            log: lmao,
         };
         arm7.registers[13] = STACK_USER_SYSTEM_START;
         arm7.irq_banked[0] = STACK_IRQ_START;
@@ -52,13 +60,12 @@ impl Cpu {
     pub fn next(&mut self) {
         self.output_registers();
         // THUMB MODE
-        if self.cpsr_register & STATE_BIT == STATE_BIT {
+        if (self.cpsr_register & STATE_BIT) == STATE_BIT {
             let opcode = self.fetch_thumb();
-            self.decode_thumb(opcode);
+            //self.decode_thumb(opcode);
             self.registers[15] += 2;
-        }
-        // ARM MODE
-        else {
+        } else {
+            // ARM MODE
             let opcode = self.fetch_arm();
             self.decode_arm(opcode);
             self.registers[15] += 4;
@@ -77,64 +84,95 @@ impl Cpu {
 
     fn fetch_arm(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        self
-            .memory
-            .borrow()
-            .get_word(self.registers[15] & 0xFFFF_FFFC)
+        self.memory.borrow().get_word(self.registers[15] & 0xffff_fffc)
     }
 
     fn fetch_thumb(&mut self) -> u16 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        self
-            .memory
-            .borrow()
-            .get_halfword(self.registers[15] & 0xFFFF_FFFE)
+        self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe)
     }
 
-    // TODO: a single data transfer opcode might be an undefinied instruction, should take care
-    // of it at a later date
     fn decode_arm(&mut self, opcode: u32) {
         //println!("Decoding {:#08x}", opcode);
-        if !CONDITION_LUT[(((opcode >> 24) & 0xF0) | self.cpsr_register >> 28) as usize] {
+        if !CONDITION_LUT[(((opcode >> 24) & 0xf0) | (self.cpsr_register >> 28)) as usize] {
             return;
         }
-        //let lmao = Instant::now();
-        match opcode & (0x3 << 26) {
-            0x0 => match opcode & 0x90 {
-                0x0 | 0x80 => self.sr_or_alu(opcode),
-                0x10 => match opcode & 0x12F_FF10 {
-                    0x12F_FF10 => self.branch_and_exchange(opcode),
-                    _ => self.sr_or_alu(opcode),
-                },
-                0x90 => match opcode & 0x200_0000 {
-                    0x200_0000 => self.sr_or_alu(opcode),
-                    _ => match opcode & 0x60 {
-                        0x0 => match opcode & 0x180_0000 {
-                            0x0 => self.multiply(opcode),
-                            0x80_0000 => self.multiply_long(opcode),
-                            0x100_0000 => self.single_data_swap(opcode),
-                            _ => panic!("Undefinied instruction"),
-                        },
-                        _ => self.halfword_data_transfer(opcode)
-                    }
-                },
-                _ => panic!("Undefinied instruction"),
-            },
-            0x400_0000 => self.single_data_transfer(opcode),
-            0x800_0000 => match opcode & 0x200_0000 {
-                0x0 => self.block_data_transfer(opcode),
-                0x200_0000 => self.branch(opcode),
-                _ => panic!("Undefinied instruction"),
-            },
-            _ => () //panic!("Undefinied instruction"),
+        let bits27_20 = (opcode >> 20) & 0xff;
+        let bits7_4 = (opcode >> 4) & 0xf;
+        let instruction = INSTRUCTION_LUT[((bits27_20 << 4) | bits7_4) as usize];
+        match instruction {
+            Instruction::BranchAndExchange => self.branch_and_exchange(opcode),
+            Instruction::Alu { operand2_type, opcode: alu_opcode, set_conditions, shift_type } =>
+                self.alu_command(operand2_type, alu_opcode, set_conditions, shift_type, opcode),
+            Instruction::Branch { link } => self.branch(link, opcode),
+            Instruction::MRSTransfer { source_is_spsr } =>
+                self.mrs(source_is_spsr, get_register_number_at!(opcode, 12)),
+            Instruction::MSRTransfer { operand2_type, destination_is_spsr } =>
+                self.msr(operand2_type, destination_is_spsr, opcode),
+            Instruction::Multiply { accumulate, set_conditions } =>
+                self.multiply(accumulate, set_conditions, opcode),
+            Instruction::MultiplyLong { signed, accumulate, set_conditions } =>
+                self.multiply_long(signed, accumulate, set_conditions, opcode),
+            Instruction::SingleDataTransfer {
+                operand2_type,
+                pre_indexing,
+                add_offset,
+                transfer_byte,
+                write_back,
+                load,
+                shift_type,
+            } =>
+                self.single_data_transfer(
+                    operand2_type,
+                    pre_indexing,
+                    add_offset,
+                    transfer_byte,
+                    write_back,
+                    load,
+                    shift_type,
+                    opcode
+                ),
+            Instruction::HalfowrdTransfer {
+                immediate,
+                pre_indexing,
+                add_offset,
+                write_back,
+                load,
+                halfword_transfer_type,
+            } =>
+                self.halfword_data_transfer(
+                    immediate,
+                    pre_indexing,
+                    add_offset,
+                    write_back,
+                    load,
+                    halfword_transfer_type,
+                    opcode
+                ),
+            Instruction::BlockDataTransfer {
+                pre_indexing,
+                add_offset,
+                load_psr,
+                write_back,
+                load,
+            } =>
+                self.block_data_transfer(
+                    pre_indexing,
+                    add_offset,
+                    load_psr,
+                    write_back,
+                    load,
+                    opcode
+                ),
+            Instruction::SingleDataSwap { transfer_byte } =>
+                self.single_data_swap(transfer_byte, opcode),
+            Instruction::SoftwareInterrupt => todo!(),
+            Instruction::Undefined => todo!(),
+            Instruction::NoOp => panic!(),
         }
-        /* println!(
-            "execute: {}",
-            Instant::now().duration_since(lmao).as_secs_f64()
-        ); */
     }
-    
-    fn decode_thumb(&mut self, opcode: u16) {
+
+    /* fn decode_thumb(&mut self, opcode: u16) {
         match opcode & 0xE000 {
             0x0 => match  opcode & 0x1800 {
                 0x1800 => (),
@@ -206,11 +244,12 @@ impl Cpu {
         };
         let opcode = alu_opcode | (destination_register << 16) | (destination_register << 12) | source_register;
         self.alu_command(opcode);
-    }
+    } */
 
     fn switch_modes(&mut self, old_mode: u32) {
         match old_mode {
-            USER_MODE | SYSTEM_MODE => self.user_banked.copy_from_slice(&mut self.registers[13..15]),
+            USER_MODE | SYSTEM_MODE =>
+                self.user_banked.copy_from_slice(&mut self.registers[13..15]),
             FIQ_MODE => {
                 // Swap beacuse the other modes all share R8 through R12
                 self.registers[8..13].swap_with_slice(&mut self.fiq_lo_banked);
@@ -222,7 +261,7 @@ impl Cpu {
             UNDEFINED_MODE => self.undefinied_banked.copy_from_slice(&mut self.registers[13..15]),
             _ => panic!("Unrecognized mode"),
         }
-        match self.cpsr_register & 0x1F {
+        match self.cpsr_register & 0x1f {
             USER_MODE | SYSTEM_MODE => self.registers[13..15].copy_from_slice(&self.user_banked),
             FIQ_MODE => {
                 // Swap beacuse the other modes all share R8 through R12
@@ -233,86 +272,18 @@ impl Cpu {
             ABORT_MODE => self.registers[13..15].copy_from_slice(&self.abort_banked),
             IRQ_MODE => self.registers[13..15].copy_from_slice(&self.irq_banked),
             UNDEFINED_MODE => self.registers[13..15].copy_from_slice(&self.undefinied_banked),
-            _ => panic!("Unrecognized mode")
+            _ => panic!("Unrecognized mode"),
         }
-    }
-
-    fn sr_or_alu(&mut self, opcode: u32) {
-        match opcode & 0x1F0_0000 {
-            0x100_0000 | 0x120_0000 | 0x140_0000 | 0x160_0000 => self.sr_operation(opcode),
-            _ => self.alu_command(opcode & 0x3FF_FFFF),
-        }
-    }
-
-    #[inline(always)]
-    pub fn get_rn_register_number(opcode: u32) -> usize {
-        ((opcode >> 16) & 0xF) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rd_register_number(opcode: u32) -> usize {
-        ((opcode >> 12) & 0xF) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rs_register_number(opcode: u32) -> usize {
-        ((opcode >> 8) & 0xF) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rm_register_number(opcode: u32) -> usize {
-        (opcode & 0xF) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rn_register_value(&self, opcode: u32) -> u32 {
-        self.registers[Self::get_rn_register_number(opcode)]
-    }
-
-    #[inline(always)]
-    pub fn get_rd_register_value(&self, opcode: u32) -> u32 {
-        self.registers[Self::get_rd_register_number(opcode)]
-    }
-
-    #[inline(always)]
-    pub fn get_rs_register_value(&self, opcode: u32) -> u32 {
-        self.registers[Self::get_rs_register_number(opcode)]
-    }
-
-    #[inline(always)]
-    pub fn get_rm_register_value(&self, opcode: u32) -> u32 {
-        self.registers[Self::get_rm_register_number(opcode)]
-    }
-
-    #[inline(always)]
-    pub fn get_ro_t_register_number(opcode: u16) -> usize {
-        ((opcode >> 6) & 0x7) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rs_t_register_number(opcode: u16) -> usize {
-        ((opcode >> 3) & 0x7) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rd_t_register_number(opcode: u16) -> usize {
-        (opcode & 0x7) as usize
-    }
-
-    #[inline(always)]
-    pub fn get_rb_t_register_number(opcode: u16) -> usize {
-        ((opcode >> 8) & 0x7) as usize
     }
 
     fn branch_and_exchange(&mut self, opcode: u32) {
-        let mut address = self.get_rm_register_value(opcode);
+        let mut address = self.registers[get_register_number_at!(opcode, 0)];
         // Compensation needs to be done because PC is incremented after instruction is executed
         // THUMB MODE
-        if self.cpsr_register & STATE_BIT != 0 {
+        if (self.cpsr_register & STATE_BIT) != 0 {
             address -= 2;
-        }
-        // ARM MODE 
-        else {
+        } else {
+            // ARM MODE
             address -= 4;
         }
         let thumb_bit = address & 0x1;
@@ -320,18 +291,18 @@ impl Cpu {
         self.registers[15] = address & !0x1;
     }
 
-    fn branch(&mut self, opcode: u32) {
+    fn branch(&mut self, link: bool, opcode: u32) {
         // Due to prefetching, the PC should be 8 bytes ahead
-        let offset = (opcode & 0xFF_FFFF) as i32;
+        let offset = (opcode & 0xff_ffff) as i32;
         let correct_ofset = ((offset << 8) >> 6) + 4;
-        if check_bit!(opcode, 24) {
-            self.registers[14] = self.registers[15]
+        if link {
+            self.registers[14] = self.registers[15];
         }
         self.registers[15] = ((self.registers[15] as i32) + correct_ofset) as u32;
     }
 
     fn get_current_saved_psr(&mut self) -> &mut u32 {
-        match self.cpsr_register & 0x1F {
+        match self.cpsr_register & 0x1f {
             USER_MODE => &mut self.cpsr_register,
             FIQ_MODE => &mut self.saved_psr[0],
             IRQ_MODE => &mut self.saved_psr[1],
@@ -343,118 +314,99 @@ impl Cpu {
         }
     }
 
-    pub fn restore_cpsr(&mut self) {
-        let old_mode = self.cpsr_register & 0x1F;
+    pub(super) fn restore_cpsr(&mut self) {
+        let old_mode = self.cpsr_register & 0x1f;
         self.cpsr_register = *self.get_current_saved_psr();
-        if old_mode != self.cpsr_register & 0x1F {
+        if old_mode != (self.cpsr_register & 0x1f) {
             self.switch_modes(old_mode);
         }
         self.switch_modes(old_mode)
     }
 
-    fn sr_operation(&mut self, opcode: u32) {
-        match opcode & 0x20_0000 {
-            0x20_0000 => self.msr(opcode), // MSR
-            0x0 => self.mrs(opcode & 0x40_0000 == 0x40_0000, (opcode & 0xF000) >> 12), // MRS
+    fn msr(&mut self, operand2_type: Operand2Type, destination_is_spsr: bool, opcode: u32) {
+        let mask: u32 = match opcode & (0xf << 16) {
+            0x1_0000 => 0xff,
+            0x2_0000 => 0xff00,
+            0x3_0000 => 0xffff,
+            0x4_0000 => 0xff0000,
+            0x5_0000 => 0xff00ff,
+            0x6_0000 => 0xffff00,
+            0x7_0000 => 0xffffff,
+            0x8_0000 => 0xff000000,
+            0x9_0000 => 0xff0000ff,
+            0xa_0000 => 0xff00ff00,
+            0xb_0000 => 0xff00ffff,
+            0xc_0000 => 0xffff0000,
+            0xd_0000 => 0xffff00ff,
+            0xe_0000 => 0xffffff00,
+            0xf_0000 => 0xffffffff,
             _ => panic!(),
-        }
-    }
+        };
+        let operand_2: u32 = self.get_operand2(
+            operand2_type,
+            super::lut::ShiftType::LogicalLeft,
+            false,
+            opcode
+        );
 
-    fn msr(&mut self, opcode: u32) {
-        let mask: u32 = match opcode & (0xF << 16) {
-            0x1_0000 => 0xFF,
-            0x2_0000 => 0xFF00,
-            0x3_0000 => 0xFFFF,
-            0x4_0000 => 0xFF0000,
-            0x5_0000 => 0xFF00FF,
-            0x6_0000 => 0xFFFF00,
-            0x7_0000 => 0xFFFFFF,
-            0x8_0000 => 0xFF000000,
-            0x9_0000 => 0xFF0000FF,
-            0xA_0000 => 0xFF00FF00,
-            0xB_0000 => 0xFF00FFFF,
-            0xC_0000 => 0xFFFF0000,
-            0xD_0000 => 0xFFFF00FF,
-            0xE_0000 => 0xFFFFFF00,
-            0xF_0000 => 0xFFFFFFFF,
-            _ => panic!(),
-        };
-        let operand_2: u32 = 
-        // Is immediate
-        if check_bit!(opcode, 25) {
-            let shift = ((opcode & 0xF00) >> 8) * 2;
-            (opcode & 0xFF).rotate_right(shift)
+        if (self.cpsr_register & 0x1f) == USER_MODE && (mask & 0xff) == 0xff {
+            panic!("Tried to set control flags in user mode");
         }
-        // Is in register
-        else {
-            self.get_rm_register_value(opcode)
-        };
-        
-        if self.cpsr_register & 0x1F == USER_MODE && mask & 0xFF == 0xFF {
-            panic!("Tried to set control flags in user mode")
-        }
-        let old_mode = self.cpsr_register & 0x1F;
+
+        let old_mode = self.cpsr_register & 0x1f;
         self.cpsr_register = (operand_2 & mask) | (self.cpsr_register & !mask);
-        if old_mode != self.cpsr_register & 0x1F {
+        if old_mode != (self.cpsr_register & 0x1f) {
             self.switch_modes(old_mode);
         }
     }
 
-    fn mrs(&mut self, current_psr: bool, destination_register: u32) {
-        if current_psr {
-            self.registers[destination_register as usize] = self.cpsr_register;
+    fn mrs(&mut self, source_is_spsr: bool, destination_register: usize) {
+        if source_is_spsr {
+            self.registers[destination_register] = self.cpsr_register;
         } else {
-            self.registers[destination_register as usize] = *self.get_current_saved_psr();
+            self.registers[destination_register] = *self.get_current_saved_psr();
         }
     }
 
-    fn multiply(&mut self, opcode: u32) {
-        let operand_1 =
-        // If accumulate
-        if check_bit!(opcode, 21) {
-            self.get_rd_register_value(opcode)
+    fn multiply(&mut self, accumulate: bool, set_conditions: bool, opcode: u32) {
+        let operand_1 = if accumulate {
+            self.registers[get_register_number_at!(opcode, 12)]
         } else {
             0
         };
-        let operand_2 = self.get_rs_register_value(opcode);
-        let operand_3 = self.get_rm_register_value(opcode);
-        let dest_register = Self::get_rn_register_number(opcode);
+        let operand_2 = self.registers[get_register_number_at!(opcode, 8)];
+        let operand_3 = self.registers[get_register_number_at!(opcode, 0)];
+        let destination_register = get_register_number_at!(opcode, 16);
         let result = operand_3.wrapping_mul(operand_2).wrapping_add(operand_1);
-        // If set condition
-        if check_bit!(opcode, 20) {
+        if set_conditions {
             self.set_multiply_flags(result);
         }
-        self.registers[dest_register] = result;
+        self.registers[destination_register] = result;
     }
 
-    fn multiply_long(&mut self, opcode: u32) {
-        let register_hi = opcode & 0xF_0000;
-        let register_lo = opcode & 0xF000;
-        let operand_1 = self.registers[(opcode & 0xF00) as usize];
-        let operand_2 = self.registers[(opcode & 0xF) as usize];
-        let mut operand_3 = 0;
-        // If accumulate
-        if opcode & 0x20_0000 == 0x20_0000 {
-            operand_3 = ((self.registers[register_hi as usize] as u64) << 32)
-                | self.registers[register_lo as usize] as u64;
-        }
-        let result =
-        // If Signed
-        if opcode & 0x40_0000 == 0x40_0000 {
-            (operand_2 as i64 * operand_1 as i64).wrapping_add(operand_3 as i64) as u64
+    fn multiply_long(&mut self, signed: bool, accumulate: bool, set_conditions: bool, opcode: u32) {
+        let register_hi = self.registers[get_register_number_at!(opcode, 16)] as u64;
+        let register_lo = self.registers[get_register_number_at!(opcode, 12)] as u64;
+        let operand_1 = self.registers[get_register_number_at!(opcode, 8)];
+        let operand_2 = self.registers[get_register_number_at!(opcode, 0)];
+
+        let operand_3 = if accumulate { (register_hi << 32) | register_lo } else { 0 };
+
+        let result = if signed {
+            ((operand_2 as i64) * (operand_1 as i64)).wrapping_add(operand_3 as i64) as u64
         } else {
-            (operand_2 as u64 * operand_1 as u64).wrapping_add(operand_3)
+            ((operand_2 as u64) * (operand_1 as u64)).wrapping_add(operand_3)
         };
 
-        self.registers[register_hi as usize] = (result & 0xFFFF_FFFF_0000_0000 >> 32) as u32;
-        self.registers[register_lo as usize] = (result & 0xFFFF_FFFF) as u32;
-        if opcode & 0x10_0000 == 0x10_0000 {
+        self.registers[register_hi as usize] = (result & (0xffff_ffff_0000_0000 >> 32)) as u32;
+        self.registers[register_lo as usize] = (result & 0xffff_ffff) as u32;
+        if set_conditions {
             self.set_long_multiply_flags(result);
         }
     }
 
     fn set_long_multiply_flags(&mut self, result: u64) {
-        self.cpsr_register &= 0x1FFF_FFFF;
+        self.cpsr_register &= 0x1fff_ffff;
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
@@ -464,7 +416,7 @@ impl Cpu {
     }
 
     fn set_multiply_flags(&mut self, result: u32) {
-        self.cpsr_register &= 0x1FFF_FFFF;
+        self.cpsr_register &= 0x1fff_ffff;
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
@@ -473,91 +425,63 @@ impl Cpu {
         }
     }
 
-    fn single_data_transfer(&mut self, opcode: u32) {
+    fn single_data_transfer(
+        &mut self,
+        operand2_type: Operand2Type,
+        pre_indexing: bool,
+        add_offset: bool,
+        transfer_byte: bool,
+        write_back: bool,
+        load: bool,
+        shift_type: ShiftType,
+        opcode: u32
+    ) {
         self.registers[15] += 8;
-        let mut address = self.get_rn_register_value(opcode);
+        let base_register = get_register_number_at!(opcode, 16);
+        let mut address = self.registers[base_register];
         self.registers[15] += 4;
-        let src_dst_register = Self::get_rd_register_number(opcode);
-        let mut offset = 0;
-        let register_offset = check_bit!(opcode, 25);
-        let pre_indexing = check_bit!(opcode, 24);
-        let up = check_bit!(opcode, 23);
-        let byte = check_bit!(opcode, 22);
-        let write_back = check_bit!(opcode, 21);
-        let load = check_bit!(opcode, 20);
-        // TODO repeated code with alu
-        // Is register offset
-        if register_offset {
-            offset = self.get_rm_register_value(opcode);
-            // Shift is in a register
-            if check_bit!(opcode, 4) {
-                // Shift is only done using the least significant byte in the register
-                let value = self.get_rs_register_value(opcode);
-                let shift_type = 0x60;
-                // SET CONDITIONS CAN OR CANNOT BE TRUE, I HAVE NO FUCKING CLUE
-                offset = self.barrel_shifter(value, offset, shift_type, true, true);
-            }
-            // Shift is an immediate value
-            else {
-                let value = (opcode & 0xF80) >> 7;
-                let shift_type = (opcode & 0x60) >> 5;
-                // SAME FOR HERE
-                offset = self.barrel_shifter(value, offset, shift_type, false, true);
-            }
-        }
-        // Is immediate value
-        else {
-            offset = opcode & 0xFFF;
-        }
-        // Pre indexing
+        let src_dst_register = get_register_number_at!(opcode, 12);
+        let offset = self.get_operand2(operand2_type, shift_type, true, opcode);
+
         if pre_indexing {
-            if up {
+            if add_offset {
                 address += offset;
             } else {
                 address -= offset;
             }
         }
-        // Load from memory
+
         if load {
-            self.load_memory(
-                address,
-                src_dst_register,
-                byte,
-            );
+            self.load_memory(address, src_dst_register, transfer_byte);
         } else {
-            self.store_memory(
-                address,
-                src_dst_register.clone(),
-                byte,
-            )
+            self.store_memory(address, src_dst_register, transfer_byte);
         }
-        // Post Indexing
+
         if !pre_indexing {
-            if up {
+            if add_offset {
                 address += offset;
             } else {
                 address -= offset;
             }
         }
-        // Write Back
+
         if write_back {
-            self.registers[Self::get_rn_register_number(opcode)] = address;
+            self.registers[base_register] = address;
         }
         self.registers[15] -= 12;
     }
 
     fn load_memory(&mut self, address: u32, dst_register: usize, is_byte: bool) {
-        let value_to_load = if is_byte {
+        self.registers[dst_register] = if is_byte {
             self.memory.borrow()[address as usize] as u32
         } else {
             let value = self.memory.borrow().get_word(address);
             if address % 4 != 0 {
-                self.barrel_shifter(value, (address & 3) * 8, 3, false, true)
+                self.barrel_shifter(value, (address & 3) * 8, ShiftType::RotateRight, false, true)
             } else {
                 value
             }
         };
-        self.registers[dst_register] = value_to_load;
     }
 
     fn store_memory(&mut self, address: u32, src_register: usize, is_byte: bool) {
@@ -565,99 +489,127 @@ impl Cpu {
         if !is_byte {
             self.memory.borrow_mut().store_word(address, value_to_store);
         } else {
-            self.memory
-                .borrow_mut()
-                .store_byte(address, value_to_store as u8);
+            self.memory.borrow_mut().store_byte(address, value_to_store as u8);
         }
     }
 
-    fn halfword_data_transfer(&mut self, opcode: u32) {
+    fn halfword_data_transfer(
+        &mut self,
+        immediate: bool,
+        pre_indexing: bool,
+        add_offset: bool,
+        write_back: bool,
+        load: bool,
+        halfword_transfer_type: HalfwordTransferType,
+        opcode: u32
+    ) {
         self.registers[15] += 8;
-        let mut address = self.get_rn_register_value(opcode);
+        let base_register = get_register_number_at!(opcode, 16);
+        let mut address = self.registers[base_register];
         self.registers[15] += 4;
-        let src_dst_register = Self::get_rd_register_number(opcode);
-        let offset = match check_bit!(opcode, 22) {
-            true => opcode & 0xF | (opcode & 0xF00) >> 4,
-            false => self.get_rm_register_value(opcode)
+        let src_dst_register = get_register_number_at!(opcode, 12);
+        let offset = match immediate {
+            true => (opcode & 0xf) | ((opcode & 0xf00) >> 4),
+            false => self.registers[get_register_number_at!(opcode, 0)],
         };
-        // Pre indexing
-        if opcode & 0x100_0000 == 0x100_0000 {
-            if opcode & 0x80_0000 == 0x80_0000 {
+
+        if pre_indexing {
+            if add_offset {
                 address += offset;
             } else {
                 address -= offset;
             }
         }
-        // Load from memory
-        if opcode & 0x10_0000 == 0x10_0000 {
-            self.load_halfword(address, src_dst_register, opcode & 0x60);
+
+        if load {
+            self.load_halfword(address, src_dst_register, halfword_transfer_type);
         } else {
-            self.store_halfword(address, src_dst_register, opcode & 0x60)
+            self.store_halfword(address, src_dst_register, halfword_transfer_type);
         }
-        // Post Indexing
-        if opcode & 0x100_0000 == 0x0 {
-            if opcode & 0x80_0000 == 0x80_0000 {
+
+        if !pre_indexing {
+            if (opcode & 0x80_0000) == 0x80_0000 {
                 address += offset;
             } else {
                 address -= offset;
             }
         }
-        // Write Back
-        if opcode & 0x20_0000 == 0x20_0000 {
-            self.registers[Self::get_rn_register_number(opcode)] = address;
+
+        if write_back {
+            self.registers[base_register] = address;
         }
         self.registers[15] -= 12;
     }
 
-    fn load_halfword(&mut self, address: u32, dst_register: usize, sh: u32) {
+    fn load_halfword(
+        &mut self,
+        address: u32,
+        dst_register: usize,
+        halfword_transfer_type: HalfwordTransferType
+    ) {
         let value = self.memory.borrow().get_halfword(address);
-        match sh {
-            0x20 => self.registers[dst_register] = value as u32,
-            0x40 => self.registers[dst_register] = (((value & 0xFF) as i8) as i32) as u32,
-            0x60 => self.registers[dst_register] = ((value as i16) as i32) as u32,
-            _ => panic!("Something went terribly wrong while loading a halfword"),
+        match halfword_transfer_type {
+            HalfwordTransferType::UnsignedHalfwords => {
+                self.registers[dst_register] = value as u32;
+            }
+            HalfwordTransferType::SignedByte => {
+                self.registers[dst_register] = (value & 0xff) as i8 as i32 as u32;
+            }
+            HalfwordTransferType::SignedHalfwords => {
+                self.registers[dst_register] = value as i16 as i32 as u32;
+            }
+            HalfwordTransferType::NoOp =>
+                panic!("Something went terribly wrong while loading a halfword"),
         }
     }
 
-    fn store_halfword(&mut self, address: u32, src_register: usize, sh: u32) {
+    fn store_halfword(
+        &mut self,
+        address: u32,
+        src_register: usize,
+        halfword_transfer_type: HalfwordTransferType
+    ) {
         let value = self.registers[src_register] as u16;
-        if sh & 0x20 == 0x20 {
-            self.memory
-                .borrow_mut()
-                .store_halfword(address, value);
+        if halfword_transfer_type == HalfwordTransferType::UnsignedHalfwords {
+            self.memory.borrow_mut().store_halfword(address, value);
         } else {
             panic!("Something went terribly wrong while storing a halfword");
         }
     }
 
-    fn block_data_transfer(&mut self, opcode: u32) {
-        let mut address = self.get_rn_register_value(opcode);
-        let mut register_mask = opcode & 0xFFFF;
-        let mut registers = Vec::new();
+    fn block_data_transfer(
+        &mut self,
+        pre_indexing: bool,
+        add_offset: bool,
+        load_psr: bool,
+        write_back: bool,
+        load: bool,
+        opcode: u32
+    ) {
+        let base_register = get_register_number_at!(opcode, 16);
+        let mut address = self.registers[base_register];
+        let mut register_mask = opcode & 0xffff;
         let number_registers = register_mask.count_ones();
+        let mut registers = Vec::new();
         registers.reserve(number_registers as usize);
-        let pre_indexing = check_bit!(opcode, 24);
-        let up = check_bit!(opcode, 23);
-        let psr_user_bit = check_bit!(opcode, 22);
-        let write_back = check_bit!(opcode, 21);
-        let load = check_bit!(opcode, 20);
         let mut final_address = 0;
         for i in 0u8..16u8 {
-            if register_mask & 0x1 == 0x1 {
+            if (register_mask & 0x1) == 0x1 {
                 registers.push(i);
             }
             register_mask = register_mask >> 1;
         }
+
         if pre_indexing {
-            if up {
+            if add_offset {
                 final_address += address + 4 * number_registers;
-                address += 4
+                address += 4;
             } else {
                 final_address += address - 4 * number_registers;
-                address = final_address
+                address = final_address;
             }
         } else {
-            if up {
+            if add_offset {
                 final_address += address + 4 * number_registers;
             } else {
                 final_address += address - 4 * number_registers;
@@ -665,30 +617,28 @@ impl Cpu {
             }
         }
         // Store old mode if S bit is set to transfer user mode registers
-        let old_mode = self.cpsr_register & 0x1F;
-        if psr_user_bit && self.cpsr_register & USER_MODE != USER_MODE {
-            self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
-            self.switch_modes(old_mode)
+        let old_mode = self.cpsr_register & 0x1f;
+        if load_psr && (self.cpsr_register & USER_MODE) != USER_MODE {
+            self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | USER_MODE;
+            self.switch_modes(old_mode);
         }
-        // Load Multiple
+
         if load {
-            self.load_multiple(address, &registers, old_mode, psr_user_bit);
-        }
-        // Store Multiple
-        else {
+            self.load_multiple(address, &registers, old_mode, load_psr);
+        } else {
             self.store_multiple(address, &registers);
         }
-        // Restore old mode
-        if psr_user_bit {
-            self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
-            self.switch_modes(USER_MODE)
+
+        if load_psr {
+            self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | old_mode;
+            self.switch_modes(USER_MODE);
         }
-        // Write Back
+
         if write_back {
             if write_back {
-                self.registers[Self::get_rn_register_number(opcode)] = final_address;
+                self.registers[base_register] = final_address;
             } else {
-                self.registers[Self::get_rn_register_number(opcode)] = final_address;
+                self.registers[base_register] = final_address;
             }
         }
     }
@@ -696,9 +646,9 @@ impl Cpu {
     fn load_multiple(&mut self, mut address: u32, registers: &[u8], old_mode: u32, psr_bit: bool) {
         for register in registers {
             if *register == 15 && psr_bit {
-                self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | old_mode;
+                self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | old_mode;
                 self.cpsr_register = *self.get_current_saved_psr();
-                self.cpsr_register = self.cpsr_register & 0xFFFF_FFE0 | USER_MODE;
+                self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | USER_MODE;
             }
             self.registers[*register as usize] = self.memory.borrow().get_word(address);
             address += 4;
@@ -713,12 +663,11 @@ impl Cpu {
         }
     }
 
-    fn single_data_swap(&mut self, opcode: u32) {
-        let address = self.get_rn_register_value(opcode);
-        let dst_register = Self::get_rd_register_number(opcode);
-        let src_register = Self::get_rm_register_number(opcode);
-        let is_byte = check_bit!(opcode, 22);
-        self.load_memory(address, dst_register, is_byte);
-        self.store_memory(address, src_register, is_byte);
+    fn single_data_swap(&mut self, transfer_byte: bool, opcode: u32) {
+        let address = self.registers[get_register_number_at!(opcode, 16)];
+        let dst_register = get_register_number_at!(opcode, 12);
+        let src_register = get_register_number_at!(opcode, 0);
+        self.load_memory(address, dst_register, transfer_byte);
+        self.store_memory(address, src_register, transfer_byte);
     }
 }

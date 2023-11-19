@@ -15,13 +15,13 @@
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}\\target\\debug\\DeeSNuts.exe",
+            "program": "${workspaceFolder}\\target\\debug\\dees_nuts.exe",
             "args": [
                 "${workspaceFolder}\\bios\\BIOSGBA.ROM",
-                "${workspaceFolder}\\tests\\arm.gba"
+                "${workspaceFolder}\\tests\\gang.gba"
             ],
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
+            "cwd": "${workspaceRoot}\\logs",
             "environment": [],
             "console": "externalTerminal"
         }
