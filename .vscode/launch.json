@@ -2,13 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Check log",
+            "name": "Compare log",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}\\logs\\log_comparer.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "cwd": "${workspaceFolder}\\logs"
+            "cwd": "${workspaceFolder}\\logs",
+            "args": [">", "out.txt"]
+        },
+        {
+            "name": "log.bin into txt",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}\\logs\\log_checker.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}\\logs",
+            "args": [">", "arm-my-log.txt"]
         },
         {
             "preLaunchTask": "rust: cargo build",
@@ -18,7 +29,7 @@
             "program": "${workspaceFolder}\\target\\debug\\dees_nuts.exe",
             "args": [
                 "${workspaceFolder}\\bios\\BIOSGBA.ROM",
-                "${workspaceFolder}\\tests\\gang.gba"
+                "${workspaceFolder}\\tests\\arm.gba"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}\\logs",

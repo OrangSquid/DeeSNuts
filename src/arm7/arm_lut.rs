@@ -2,151 +2,7 @@ use core::panic;
 
 use crate::check_bit;
 
-#[derive(Clone, Copy)]
-pub enum Instruction {
-    BranchAndExchange,
-    Alu {
-        operand2_type: Operand2Type,
-        opcode: AluOpcode,
-        set_conditions: bool,
-        shift_type: ShiftType
-    },
-    Branch {
-        link: bool
-    },
-    MRSTransfer {
-        source_is_spsr: bool
-    },
-    MSRTransfer {
-        operand2_type: Operand2Type,
-        destination_is_spsr: bool
-    },
-    Multiply {
-        accumulate: bool,
-        set_conditions: bool
-    },
-    MultiplyLong {
-        signed: bool,
-        accumulate: bool,
-        set_conditions: bool
-    },
-    SingleDataTransfer {
-        operand2_type: Operand2Type,
-        pre_indexing: bool,
-        add_offset: bool,
-        transfer_byte: bool,
-        write_back: bool,
-        load: bool,
-        shift_type: ShiftType
-    },
-    HalfowrdTransfer {
-        immediate: bool,
-        pre_indexing: bool,
-        add_offset: bool,
-        write_back: bool,
-        load: bool,
-        halfword_transfer_type: HalfwordTransferType
-    },
-    BlockDataTransfer {
-        pre_indexing: bool,
-        add_offset: bool,
-        load_psr: bool,
-        write_back: bool,
-        load: bool
-    },
-    SingleDataSwap {
-        transfer_byte: bool
-    },
-    SoftwareInterrupt,
-    Undefined,
-    NoOp
-}
-
-#[derive(Clone, Copy)]
-pub enum AluOpcode {
-    And,
-    ExclusiveOr,
-    Subtract,
-    RightSubtract,
-    Add,
-    AddCarry,
-    SubtractCarry,
-    RightSubtractCarry,
-    TestAnd,
-    TestExclusiveOr,
-    CompareSubtract,
-    CompareAdd,
-    Or,
-    Move,
-    BitClear,
-    MoveNot
-}
-
-const fn to_alu_opcode(value: u8) -> AluOpcode {
-    match value {
-        0x0 => AluOpcode::And,
-        0x1 => AluOpcode::ExclusiveOr,
-        0x2 => AluOpcode::Subtract,
-        0x3 => AluOpcode::RightSubtract,
-        0x4 => AluOpcode::Add,
-        0x5 => AluOpcode::AddCarry,
-        0x6 => AluOpcode::SubtractCarry,
-        0x7 => AluOpcode::RightSubtractCarry,
-        0x8 => AluOpcode::TestAnd,
-        0x9 => AluOpcode::TestExclusiveOr,
-        0xA => AluOpcode::CompareSubtract,
-        0xB => AluOpcode::CompareAdd,
-        0xC => AluOpcode::Or,
-        0xD => AluOpcode::Move,
-        0xE => AluOpcode::BitClear,
-        0xF => AluOpcode::MoveNot,
-        _ => panic!("Invalid ALU opcode")
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum ShiftType {
-    LogicalLeft,
-    LogicalRight,
-    ArithmeticRight,
-    RotateRight
-}
-
-const fn to_shift_type(value: u8) -> ShiftType {
-    match value {
-        0x0 => ShiftType::LogicalLeft,
-        0x1 => ShiftType::LogicalRight,
-        0x2 => ShiftType::ArithmeticRight,
-        0x3 => ShiftType::RotateRight,
-        _ => panic!("Invalid shift type")
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum HalfwordTransferType {
-    NoOp,
-    UnsignedHalfwords,
-    SignedByte,
-    SignedHalfwords
-}
-
-const fn to_halfword_transfer_type(value: u8) -> HalfwordTransferType {
-    match value {
-        0x0 => HalfwordTransferType::NoOp,
-        0x1 => HalfwordTransferType::UnsignedHalfwords,
-        0x2 => HalfwordTransferType::SignedByte,
-        0x3 => HalfwordTransferType::SignedHalfwords,
-        _ => panic!("Invalid halfword transfer type")
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum Operand2Type {
-    RegisterWithRegisterShift,
-    RegisterWithImmediateShift,
-    ImmediateWithRotation,
-    Immediate
-}
+use super::{constants::*, cpu::Cpu};
 
 pub const fn instruction_lut() -> [Instruction; 4096] {
     let mut temp = [Instruction::NoOp; 4096];
@@ -195,10 +51,12 @@ const fn decode_sr_alu(bits27_20: u8, bits7_4: u8) -> Instruction {
 const fn decode_arm_0x0_start(bits27_20: u8, bits7_4: u8) -> Instruction {
     match bits7_4 & 0x9 {
         0x0 | 0x8 => decode_sr_alu(bits27_20, bits7_4),
-        0x1 =>
-        match ((bits27_20 & 0x12) << 4) as u16 | (bits7_4 & 0x1) as u16 {
-            0x121 => Instruction::BranchAndExchange,
-            _ => decode_sr_alu(bits27_20, bits7_4)
+        0x1 => {
+            if bits27_20 == 0x12 && bits7_4 == 0x1 {
+                Instruction::BranchAndExchange
+            } else {
+                decode_sr_alu(bits27_20, bits7_4)
+            }
         },
         0x9 =>
         match bits27_20 & 0x20 {
@@ -283,6 +141,12 @@ pub const fn decode_arm(bits27_20: u8, bits7_4: u8) -> Instruction {
         _ => panic!()
     }
 }
+
+/* type ARMHandler = fn(&mut Cpu, u32);
+
+pub const fn lmao() -> ARMHandler {
+    Cpu::branch_and_exchange
+} */
 
 pub(in super) const fn condition_lut() -> [bool; 256] {
     const SIGN_FLAG: u8 = 0x8;

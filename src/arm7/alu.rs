@@ -2,7 +2,6 @@ use crate::{ check_bit, get_register_number_at };
 
 use super::constants::*;
 use super::cpu::Cpu;
-use super::lut::{ AluOpcode, Operand2Type, ShiftType };
 
 impl Cpu {
     pub fn alu_command(

@@ -2,12 +2,8 @@ use std::{ cell::RefCell, rc::Rc, fs::{ File, OpenOptions }, io::{ Write, BufWri
 
 use crate::{ memory::Memory, check_bit, get_register_number_at };
 
-use super::{constants::*, lut};
-use super::lut::{
-    ShiftType,
-    HalfwordTransferType,
-    Instruction,
-    Operand2Type,
+use super::constants::*;
+use super::arm_lut::{
     condition_lut,
     instruction_lut,
 };
@@ -92,10 +88,13 @@ impl Cpu {
         self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe)
     }
 
-    fn decode_arm(&mut self, opcode: u32) {
+    pub fn decode_arm(&mut self, opcode: u32) {
         //println!("Decoding {:#08x}", opcode);
         if !CONDITION_LUT[(((opcode >> 24) & 0xf0) | (self.cpsr_register >> 28)) as usize] {
             return;
+        }
+        if self.registers[15] == 0x800028c {
+            println!("Decoding {:#08x}", opcode);
         }
         let bits27_20 = (opcode >> 20) & 0xff;
         let bits7_4 = (opcode >> 4) & 0xf;
@@ -276,7 +275,7 @@ impl Cpu {
         }
     }
 
-    fn branch_and_exchange(&mut self, opcode: u32) {
+    pub fn branch_and_exchange(&mut self, opcode: u32) {
         let mut address = self.registers[get_register_number_at!(opcode, 0)];
         // Compensation needs to be done because PC is incremented after instruction is executed
         // THUMB MODE
@@ -344,7 +343,7 @@ impl Cpu {
         };
         let operand_2: u32 = self.get_operand2(
             operand2_type,
-            super::lut::ShiftType::LogicalLeft,
+            super::constants::ShiftType::LogicalLeft,
             false,
             opcode
         );
