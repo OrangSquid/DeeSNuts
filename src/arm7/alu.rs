@@ -2,28 +2,8 @@ use crate::{ check_bit, get_register_number_at };
 
 use super::constants::*;
 use super::cpu::Cpu;
-use super::lut::{ AluOpcode, Operand2Type, ShiftType };
 
 impl Cpu {
-    pub fn alu_command(
-        &mut self,
-        operand2_type: Operand2Type,
-        alu_opcode: AluOpcode,
-        set_condition_codes: bool,
-        shift_type: ShiftType,
-        opcode: u32
-    ) {
-        // prefetch compensation
-        let current_pc = self.registers[15];
-        self.registers[15] += 8;
-        let operand_1: u32 = self.registers[get_register_number_at!(opcode, 16)];
-        let destination_register = get_register_number_at!(opcode, 12);
-        let operand_2 = self.get_operand2(operand2_type, shift_type, set_condition_codes, opcode);
-        self.registers[15] = current_pc;
-
-        self.decode_alu(alu_opcode, set_condition_codes, operand_1, destination_register, operand_2)
-    }
-
     pub(super) fn get_operand2(
         &mut self,
         operand2_type: Operand2Type,
@@ -36,6 +16,7 @@ impl Cpu {
             Operand2Type::RegisterWithRegisterShift => {
                 self.registers[15] += 4;
                 let value = self.registers[get_register_number_at!(opcode, 0)] & 0xff;
+                self.registers[15] -= 4;
                 self.barrel_shifter(value, operand, shift_type, true, set_condition_codes)
             }
             Operand2Type::RegisterWithImmediateShift => {
@@ -119,14 +100,15 @@ impl Cpu {
         new_operand
     }
 
-    fn decode_alu(
+    pub(super) fn decode_alu(
         &mut self,
         opcode: AluOpcode,
         set_condition_codes: bool,
-        operand_1: u32,
+        operand_1_register: usize,
         destination_register: usize,
         operand_2: u32
     ) {
+        let operand_1 = self.registers[operand_1_register];
         let (result, carry, overflow) = match opcode {
             AluOpcode::And => self.and(operand_1, destination_register, operand_2),
             AluOpcode::ExclusiveOr => self.exclusive_or(operand_1, destination_register, operand_2),
@@ -165,6 +147,9 @@ impl Cpu {
             }
         } else if set_condition_codes && destination_register == 15 {
             self.restore_cpsr();
+        }
+        if destination_register == 15 {
+            self.flush = true;
         }
     }
 

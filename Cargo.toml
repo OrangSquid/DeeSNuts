@@ -6,9 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sdl2 = "0.35"
+sdl2 = "0.36"
 num = "0.4"
-cargo-asm = "0.1.16"
+cargo-show-asm = "0.2.22"
 
 [dev.release]
 debug = 1

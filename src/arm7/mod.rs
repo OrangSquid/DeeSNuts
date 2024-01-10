@@ -1,4 +1,5 @@
 pub mod cpu;
 mod alu;
 mod constants;
-mod lut;
+mod arm_lut;
+mod thumb_lut;
