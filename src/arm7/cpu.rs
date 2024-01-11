@@ -86,6 +86,9 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
+            if self.registers[15] == 0x8000b18 {
+                println!("aiushdgasiydgh");
+            }
             if self.pipeline_stage_2.is_some() {
                 let instruction = self.pipeline_stage_2.as_ref().unwrap();
                 if CONDITION_LUT[(((instruction.opcode >> 24) & 0xf0) | (self.cpsr_register >> 28)) as usize] {
@@ -213,7 +216,6 @@ impl Cpu {
         if old_mode != (self.cpsr_register & 0x1f) {
             self.switch_modes(old_mode);
         }
-        self.switch_modes(old_mode)
     }
 
     pub(super) fn msr(&mut self, operand2_type: Operand2Type, destination_is_spsr: bool, mask: u32, operand_2: u32) {
@@ -221,10 +223,14 @@ impl Cpu {
             panic!("Tried to set control flags in user mode");
         }
 
-        let old_mode = self.cpsr_register & 0x1f;
-        self.cpsr_register = (operand_2 & mask) | (self.cpsr_register & !mask);
-        if old_mode != (self.cpsr_register & 0x1f) {
-            self.switch_modes(old_mode);
+        if destination_is_spsr {
+            *self.get_current_saved_psr() = (operand_2 & mask) | (*self.get_current_saved_psr() & !mask);
+        } else {
+            let old_mode = self.cpsr_register & 0x1f;
+            self.cpsr_register = (operand_2 & mask) | (self.cpsr_register & !mask);
+            if old_mode != (self.cpsr_register & 0x1f) {
+                self.switch_modes(old_mode);
+            }
         }
     }
 

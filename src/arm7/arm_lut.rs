@@ -104,7 +104,7 @@ fn msr_transfer_handler(cpu: &mut Cpu, opcode: u32) {
         } else {
             Operand2Type::RegisterWithImmediateShift
         };
-    let destination_is_spsr = check_bit!(opcode, 21);
+    let destination_is_spsr = check_bit!(opcode, 22);
     let mask: u32 = match opcode & (0xf << 16) {
         0x1_0000 => 0xff,
         0x2_0000 => 0xff00,
@@ -134,7 +134,7 @@ fn msr_transfer_handler(cpu: &mut Cpu, opcode: u32) {
 }
 
 fn mrs_transfer_handler(cpu: &mut Cpu, opcode: u32) {
-    let source_is_spsr = check_bit!(opcode, 21);
+    let source_is_spsr = check_bit!(opcode, 22);
     let destination_register = get_register_number_at!(opcode, 12);
 
     cpu.mrs(source_is_spsr, destination_register);
@@ -154,9 +154,13 @@ fn alu_handler(cpu: &mut Cpu, opcode: u32) {
     let shift_type = to_shift_type((opcode >> 5) & 0x3);
     let operand_1_regsiter = get_register_number_at!(opcode, 16);
     let destination_register = get_register_number_at!(opcode, 12);
+    let old_r15 = cpu.registers[15];
     let operand_2 = cpu.get_operand2(operand2_type, shift_type, set_condition_codes, opcode);
 
     cpu.decode_alu(alu_opcode, set_condition_codes, operand_1_regsiter, destination_register, operand_2);
+    if destination_register != 15 {
+        cpu.registers[15] = old_r15;
+    }
 }
 
 fn multiply_handler(cpu: &mut Cpu, opcode: u32) {
