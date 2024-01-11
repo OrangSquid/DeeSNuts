@@ -131,7 +131,7 @@ impl Cpu {
             AluOpcode::BitClear => self.bit_clear(operand_1, destination_register, operand_2),
             AluOpcode::MoveNot => self.move_not(destination_register, operand_2)
         };
-        if set_condition_codes && destination_register != 15 {
+        if set_condition_codes {
             self.set_logical_operations_cpsr_flags(result);
             match opcode {
                 | AluOpcode::Subtract
@@ -146,11 +146,9 @@ impl Cpu {
                 }
                 _ => (),
             }
-        } else if set_condition_codes && destination_register == 15 {
-            self.restore_cpsr();
-        }
-        if destination_register == 15 {
-            self.flush = true;
+            if destination_register == 15 {
+                self.restore_cpsr();
+            }
         }
     }
 

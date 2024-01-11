@@ -99,13 +99,14 @@ fn branch_and_exchange_handler(cpu: &mut Cpu, opcode: u32) {
 
 fn msr_transfer_handler(cpu: &mut Cpu, opcode: u32) {
     let operand2_type = 
-        if check_bit!(opcode, 24) {
+        if check_bit!(opcode, 25) {
             Operand2Type::ImmediateWithRotation
         } else {
             Operand2Type::RegisterWithImmediateShift
         };
     let destination_is_spsr = check_bit!(opcode, 22);
     let mask: u32 = match opcode & (0xf << 16) {
+        0x0 => 0x0,
         0x1_0000 => 0xff,
         0x2_0000 => 0xff00,
         0x3_0000 => 0xffff,
@@ -130,7 +131,7 @@ fn msr_transfer_handler(cpu: &mut Cpu, opcode: u32) {
         opcode
     );
 
-    cpu.msr(operand2_type, destination_is_spsr, mask, operand_2);
+    cpu.msr(destination_is_spsr, mask, operand_2);
 }
 
 fn mrs_transfer_handler(cpu: &mut Cpu, opcode: u32) {
@@ -152,14 +153,20 @@ fn alu_handler(cpu: &mut Cpu, opcode: u32) {
     let alu_opcode = to_alu_opcode((opcode >> 21) & 0xF);
     let set_condition_codes =  check_bit!(opcode, 20);
     let shift_type = to_shift_type((opcode >> 5) & 0x3);
-    let operand_1_regsiter = get_register_number_at!(opcode, 16);
+    let operand_1_register = get_register_number_at!(opcode, 16);
     let destination_register = get_register_number_at!(opcode, 12);
     let old_r15 = cpu.registers[15];
-    let operand_2 = cpu.get_operand2(operand2_type, shift_type, set_condition_codes, opcode);
+    let set_condition_codes_operand_2 = match alu_opcode {
+        AluOpcode::And | AluOpcode::ExclusiveOr | AluOpcode::TestAnd | AluOpcode::TestExclusiveOr | AluOpcode::Or | AluOpcode::Move | AluOpcode::BitClear | AluOpcode::MoveNot => set_condition_codes,
+        _ => false
+    };
+    let operand_2 = cpu.get_operand2(operand2_type, shift_type, set_condition_codes_operand_2, opcode);
 
-    cpu.decode_alu(alu_opcode, set_condition_codes, operand_1_regsiter, destination_register, operand_2);
+    cpu.decode_alu(alu_opcode, set_condition_codes, operand_1_register, destination_register, operand_2);
     if destination_register != 15 {
         cpu.registers[15] = old_r15;
+    } else if cpu.registers[15] != old_r15 {
+        cpu.flush = true;
     }
 }
 

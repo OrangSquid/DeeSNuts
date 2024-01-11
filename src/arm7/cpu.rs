@@ -86,7 +86,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8000b18 {
+            if self.registers[15] == 0x8000d90 {
                 println!("aiushdgasiydgh");
             }
             if self.pipeline_stage_2.is_some() {
@@ -218,7 +218,7 @@ impl Cpu {
         }
     }
 
-    pub(super) fn msr(&mut self, operand2_type: Operand2Type, destination_is_spsr: bool, mask: u32, operand_2: u32) {
+    pub(super) fn msr(&mut self, destination_is_spsr: bool, mask: u32, operand_2: u32) {
         if (self.cpsr_register & 0x1f) == USER_MODE && (mask & 0xff) == 0xff {
             panic!("Tried to set control flags in user mode");
         }
@@ -236,9 +236,9 @@ impl Cpu {
 
     pub(super) fn mrs(&mut self, source_is_spsr: bool, destination_register: usize) {
         if source_is_spsr {
-            self.registers[destination_register] = self.cpsr_register;
-        } else {
             self.registers[destination_register] = *self.get_current_saved_psr();
+        } else {
+            self.registers[destination_register] = self.cpsr_register;
         }
     }
 
