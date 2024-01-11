@@ -6,7 +6,7 @@ use super::{constants::*, cpu::Cpu};
 
 fn dummy(cpu: &mut Cpu, foo: u32) { }
 
-pub const fn instruction_lut() -> [InstructionHandler; 4096] {
+pub const fn arm_instruction_lut() -> [InstructionHandler; 4096] {
     let dummy: InstructionHandler = dummy;
     let mut temp = [dummy; 4096];
     let mut i = 0;
@@ -21,7 +21,7 @@ pub const fn instruction_lut() -> [InstructionHandler; 4096] {
     temp
 }
 
-const fn decode_sr_alu(bits27_20: u8, bits7_4: u8) -> InstructionHandler {
+const fn decode_sr_alu(bits27_20: u8) -> InstructionHandler {
     match bits27_20 & 0x1F {
         0x12 | 0x16 => msr_transfer_handler,
         0x10 | 0x14 => mrs_transfer_handler,
@@ -31,17 +31,17 @@ const fn decode_sr_alu(bits27_20: u8, bits7_4: u8) -> InstructionHandler {
 
 const fn decode_arm_0x0_start(bits27_20: u8, bits7_4: u8) -> InstructionHandler {
     match bits7_4 & 0x9 {
-        0x0 | 0x8 => decode_sr_alu(bits27_20, bits7_4),
+        0x0 | 0x8 => decode_sr_alu(bits27_20),
         0x1 => {
             if bits27_20 == 0x12 && bits7_4 == 0x1 {
                 branch_and_exchange_handler
             } else {
-                decode_sr_alu(bits27_20, bits7_4)
+                decode_sr_alu(bits27_20)
             }
         },
         0x9 =>
         match bits27_20 & 0x20 {
-            0x20 => decode_sr_alu(bits27_20, bits7_4),
+            0x20 => decode_sr_alu(bits27_20),
             _ =>
             match bits7_4 & 0x6 {
                 0x0 =>
@@ -160,7 +160,6 @@ fn alu_handler(cpu: &mut Cpu, opcode: u32) {
 }
 
 fn multiply_handler(cpu: &mut Cpu, opcode: u32) {
-    let signed = check_bit!(opcode, 22);
     let accumulate = check_bit!(opcode, 21);
     let set_conditions =  check_bit!(opcode, 20);
     let operand_1_register = get_register_number_at!(opcode, 12);
@@ -204,7 +203,7 @@ fn single_data_transfer(cpu: &mut Cpu, opcode: u32) {
     let offset = cpu.get_operand2(operand2_type, shift_type, true, opcode);
     let src_dst_register = get_register_number_at!(opcode, 12);
 
-    cpu.single_data_transfer(operand2_type, pre_indexing, add_offset, transfer_byte, write_back, load, shift_type, base_register, offset, src_dst_register);
+    cpu.single_data_transfer(pre_indexing, add_offset, transfer_byte, write_back, load, base_register, offset, src_dst_register);
 }
 
 fn halfword_data_transfer_handler(cpu: &mut Cpu, opcode: u32) {

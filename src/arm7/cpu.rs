@@ -2,14 +2,15 @@ use std::{ cell::RefCell, rc::Rc, fs::{ File, OpenOptions }, io::{ Write, BufWri
 
 use crate::{ memory::Memory, check_bit };
 
-use super::constants::*;
+use super::{constants::*, thumb_lut::thumb_instruction_lut};
 use super::arm_lut::{
     condition_lut,
-    instruction_lut
+    arm_instruction_lut
 };
 
 const CONDITION_LUT: [bool; 256] = condition_lut();
-const INSTRUCTION_LUT: [InstructionHandler; 4096] = instruction_lut();
+const ARM_INSTRUCTION_LUT: [InstructionHandler; 4096] = arm_instruction_lut();
+const THUMB_INSTRUCTION_LUT: [InstructionHandler; 256] = thumb_instruction_lut();
 
 struct PipelineStage2 {
     handler: InstructionHandler,
@@ -66,10 +67,22 @@ impl Cpu {
 
     pub fn next(&mut self) {
         self.output_registers();
-        // THUMB MODE
         if (self.cpsr_register & STATE_BIT) == STATE_BIT {
-            let opcode = self.fetch_thumb();
-            //self.decode_thumb(opcode);
+            // THUMB MODE
+            if self.pipeline_stage_2.is_some() {
+                let instruction = self.pipeline_stage_2.as_ref().unwrap();
+                (instruction.handler)(self, instruction.opcode);
+                if self.flush {
+                    self.pipeline_flush();
+                    return;
+                }
+            }
+            if self.pipeline_stage_1.is_some() {
+                let opcode = self.pipeline_stage_1.unwrap();
+                let bits15_8 = opcode >> 8;
+                self.pipeline_stage_2 = Some(PipelineStage2 { handler: THUMB_INSTRUCTION_LUT[bits15_8 as usize], opcode });
+            }
+            self.pipeline_stage_1 = Some(self.fetch_thumb());
             self.registers[15] += 2;
         } else {
             // ARM MODE
@@ -87,7 +100,7 @@ impl Cpu {
                 let opcode = self.pipeline_stage_1.unwrap();
                 let bits27_20 = (opcode >> 20) & 0xff;
                 let bits7_4 = (opcode >> 4) & 0xf;
-                self.pipeline_stage_2 = Some(PipelineStage2 { handler: INSTRUCTION_LUT[((bits27_20 << 4) | bits7_4) as usize], opcode });
+                self.pipeline_stage_2 = Some(PipelineStage2 { handler: ARM_INSTRUCTION_LUT[((bits27_20 << 4) | bits7_4) as usize], opcode });
             }
             self.pipeline_stage_1 = Some(self.fetch_arm());
             self.registers[15] += 4;
@@ -109,19 +122,28 @@ impl Cpu {
         self.memory.borrow().get_word(self.registers[15] & 0xffff_fffc)
     }
 
-    fn fetch_thumb(&mut self) -> u16 {
+    fn fetch_thumb(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe)
+        self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe) as u32
     }
 
     pub(super) fn pipeline_flush(&mut self) {
-        let opcode = self.fetch_arm();
-        let bits27_20 = (opcode >> 20) & 0xff;
-        let bits7_4 = (opcode >> 4) & 0xf;
-        self.pipeline_stage_2 = Some(PipelineStage2 { handler: INSTRUCTION_LUT[((bits27_20 << 4) | bits7_4) as usize], opcode });
-        self.registers[15] += 4;
-        self.pipeline_stage_1 = Some(self.fetch_arm());
-        self.registers[15] += 4;
+        if (self.cpsr_register & STATE_BIT) == STATE_BIT {
+            let opcode = self.fetch_thumb();
+            let bits15_8 = opcode >> 8;
+            self.pipeline_stage_2 = Some(PipelineStage2 { handler: THUMB_INSTRUCTION_LUT[bits15_8 as usize], opcode });
+            self.registers[15] += 2;
+            self.pipeline_stage_1 = Some(self.fetch_thumb());
+            self.registers[15] += 2;
+        } else {
+            let opcode = self.fetch_arm();
+            let bits27_20 = (opcode >> 20) & 0xff;
+            let bits7_4 = (opcode >> 4) & 0xf;
+            self.pipeline_stage_2 = Some(PipelineStage2 { handler: ARM_INSTRUCTION_LUT[((bits27_20 << 4) | bits7_4) as usize], opcode });
+            self.registers[15] += 4;
+            self.pipeline_stage_1 = Some(self.fetch_arm());
+            self.registers[15] += 4;
+        }
         self.flush = false;
     }
 
@@ -160,6 +182,7 @@ impl Cpu {
         let thumb_bit = address & 0x1;
         self.cpsr_register = (self.cpsr_register & !STATE_BIT) | (thumb_bit << 5);
         self.registers[15] = address & !0x1;
+        self.flush = true;
     }
 
     pub(super) fn branch(&mut self, link: bool, mut offset: i32) {
@@ -271,13 +294,11 @@ impl Cpu {
 
     pub(super) fn single_data_transfer(
         &mut self,
-        operand2_type: Operand2Type,
         pre_indexing: bool,
         add_offset: bool,
         transfer_byte: bool,
         write_back: bool,
         load: bool,
-        shift_type: ShiftType,
         base_register: usize,
         offset: u32,
         src_dst_register: usize

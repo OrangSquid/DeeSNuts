@@ -11,3 +11,10 @@ macro_rules! get_register_number_at {
         (($opcode >> $bits) & 0xF) as usize
     };
 }
+
+#[macro_export]
+macro_rules! get_thumb_register_number_at {
+    ($opcode:expr, $bits:expr) => {
+        (($opcode >> $bits) & 0x7) as usize
+    };
+}
