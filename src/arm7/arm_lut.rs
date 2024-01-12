@@ -211,7 +211,7 @@ fn single_data_transfer(cpu: &mut Cpu, opcode: u32) {
     let shift_type = to_shift_type((opcode >> 5) & 0x3);
 
     let base_register = get_register_number_at!(opcode, 16);
-    let offset = cpu.get_operand2(operand2_type, shift_type, true, opcode);
+    let offset = cpu.get_operand2(operand2_type, shift_type, false, opcode);
     let src_dst_register = get_register_number_at!(opcode, 12);
 
     cpu.single_data_transfer(pre_indexing, add_offset, transfer_byte, write_back, load, base_register, offset, src_dst_register);

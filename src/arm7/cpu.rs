@@ -86,7 +86,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8000fec {
+            if self.registers[15] == 0x80011fc {
                 println!("aiushdgasiydgh");
             }
             if self.pipeline_stage_2.is_some() {
@@ -330,11 +330,11 @@ impl Cpu {
             } else {
                 address -= offset;
             }
-        }
-
-        if write_back {
+            self.registers[base_register] = address;
+        } else if write_back {
             self.registers[base_register] = address;
         }
+        
         self.registers[15] -= 4;
     }
 
