@@ -86,7 +86,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8000d90 {
+            if self.registers[15] == 0x8000fec {
                 println!("aiushdgasiydgh");
             }
             if self.pipeline_stage_2.is_some() {
@@ -258,20 +258,18 @@ impl Cpu {
     }
 
     pub(super) fn multiply_long(&mut self, signed: bool, accumulate: bool, set_conditions: bool, register_hi: usize, register_lo: usize, operand_1_register: usize, operand_2_register: usize) {
-        let register_hi = self.registers[register_hi] as u64;
-        let register_lo = self.registers[register_lo] as u64;
         let operand_1 = self.registers[operand_1_register];
         let operand_2 = self.registers[operand_2_register];
 
-        let operand_3 = if accumulate { (register_hi << 32) | register_lo } else { 0 };
+        let operand_3 = if accumulate { ((self.registers[register_hi] as u64) << 32) | self.registers[register_lo] as u64 } else { 0 };
 
         let result = if signed {
-            ((operand_2 as i64) * (operand_1 as i64)).wrapping_add(operand_3 as i64) as u64
+            (((operand_2 as i32) as i64) * ((operand_1 as i32) as i64)).wrapping_add(operand_3 as i64) as u64
         } else {
             ((operand_2 as u64) * (operand_1 as u64)).wrapping_add(operand_3)
         };
 
-        self.registers[register_hi as usize] = (result & (0xffff_ffff_0000_0000 >> 32)) as u32;
+        self.registers[register_hi as usize] = ((result & 0xffff_ffff_0000_0000) >> 32) as u32;
         self.registers[register_lo as usize] = (result & 0xffff_ffff) as u32;
         if set_conditions {
             self.set_long_multiply_flags(result);
@@ -279,7 +277,7 @@ impl Cpu {
     }
 
     fn set_long_multiply_flags(&mut self, result: u64) {
-        self.cpsr_register &= 0x1fff_ffff;
+        self.cpsr_register &= 0x2fff_ffff;
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
@@ -289,7 +287,7 @@ impl Cpu {
     }
 
     fn set_multiply_flags(&mut self, result: u32) {
-        self.cpsr_register &= 0x1fff_ffff;
+        self.cpsr_register &= 0x2fff_ffff;
         if result == 0 {
             self.cpsr_register |= ZERO_FLAG;
         }
