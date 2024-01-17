@@ -57,7 +57,7 @@ impl Video {
     }
 
     pub fn display(&mut self) {
-        let video_mode = self.memory.borrow().get_halfword(0x0400_0000) & 0x7;
+        let video_mode = self.memory.borrow_mut().get_halfword(0x0400_0000) & 0x7;
         match video_mode {
             0x3 => self.video_mode_3(),
             _ => ()

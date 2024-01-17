@@ -36,6 +36,7 @@ pub struct Cpu {
     pipeline_stage_2: Option<PipelineStage2>,
     pub(super) flush: bool,
     log: File,
+    last_data_bus_read: u32,
 }
 
 impl Cpu {
@@ -57,6 +58,7 @@ impl Cpu {
             pipeline_stage_2: None,
             flush: false,
             log: lmao,
+            last_data_bus_read: 0
         };
         arm7.registers[13] = STACK_USER_SYSTEM_START;
         arm7.irq_banked[0] = STACK_IRQ_START;
@@ -86,9 +88,10 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x80011fc {
+            if self.registers[15] == 0x8001384 {
                 println!("aiushdgasiydgh");
             }
+            let temp_pipeline_1 = Some(self.fetch_arm());
             if self.pipeline_stage_2.is_some() {
                 let instruction = self.pipeline_stage_2.as_ref().unwrap();
                 if CONDITION_LUT[(((instruction.opcode >> 24) & 0xf0) | (self.cpsr_register >> 28)) as usize] {
@@ -105,7 +108,7 @@ impl Cpu {
                 let bits7_4 = (opcode >> 4) & 0xf;
                 self.pipeline_stage_2 = Some(PipelineStage2 { handler: ARM_INSTRUCTION_LUT[((bits27_20 << 4) | bits7_4) as usize], opcode });
             }
-            self.pipeline_stage_1 = Some(self.fetch_arm());
+            self.pipeline_stage_1 = temp_pipeline_1;
             self.registers[15] += 4;
         }
     }
@@ -122,7 +125,9 @@ impl Cpu {
 
     fn fetch_arm(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        self.memory.borrow().get_word(self.registers[15] & 0xffff_fffc)
+        let instruction = self.memory.borrow().get_word(self.registers[15] & 0xffff_fffc);
+        self.last_data_bus_read = instruction;
+        instruction
     }
 
     fn fetch_thumb(&mut self) -> u32 {
@@ -330,31 +335,37 @@ impl Cpu {
             } else {
                 address -= offset;
             }
-            self.registers[base_register] = address;
-        } else if write_back {
+        } 
+        if (write_back || !pre_indexing) && (!load || (load && src_dst_register != base_register)) {
             self.registers[base_register] = address;
         }
-        
-        self.registers[15] -= 4;
     }
 
     fn load_memory(&mut self, address: u32, dst_register: usize, is_byte: bool) {
+        if address > 0x1000_0000 {
+            self.registers[dst_register] = self.last_data_bus_read;
+            return;
+        }
+        let memory = self.memory.borrow();
         self.registers[dst_register] = if is_byte {
-            self.memory.borrow()[address as usize] as u32
+            memory[address as usize] as u32
         } else {
-            let value = self.memory.borrow().get_word(address);
-            if address % 4 != 0 {
-                self.barrel_shifter(value, (address & 3) * 8, ShiftType::RotateRight, false, true)
-            } else {
-                value
-            }
+            let mut value = memory.get_byte(address) as u32;
+            let mut address_rotate = address / 4 * 4 + (address + 1) % 4;
+            value |= (memory.get_byte(address_rotate) as u32) << 8;
+            address_rotate = address / 4 * 4 + (address + 2) % 4;
+            value |= (memory.get_byte(address_rotate) as u32) << 16;
+            address_rotate = address / 4 * 4 + (address + 3) % 4;
+            value |= (memory.get_byte(address_rotate) as u32) << 24;
+            value
         };
+        self.last_data_bus_read = self.registers[dst_register];
     }
 
     fn store_memory(&mut self, address: u32, src_register: usize, is_byte: bool) {
         let value_to_store = self.registers[src_register];
         if !is_byte {
-            self.memory.borrow_mut().store_word(address, value_to_store);
+            self.memory.borrow_mut().store_word(address / 4 * 4, value_to_store);
         } else {
             self.memory.borrow_mut().store_byte(address, value_to_store as u8);
         }
@@ -428,6 +439,7 @@ impl Cpu {
             HalfwordTransferType::NoOp =>
                 panic!("Something went terribly wrong while loading a halfword"),
         }
+        self.last_data_bus_read = value as u32;
     }
 
     fn store_halfword(

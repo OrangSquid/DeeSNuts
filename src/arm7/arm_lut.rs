@@ -213,8 +213,15 @@ fn single_data_transfer(cpu: &mut Cpu, opcode: u32) {
     let base_register = get_register_number_at!(opcode, 16);
     let offset = cpu.get_operand2(operand2_type, shift_type, false, opcode);
     let src_dst_register = get_register_number_at!(opcode, 12);
+    let old_r15 = cpu.registers[15];
 
     cpu.single_data_transfer(pre_indexing, add_offset, transfer_byte, write_back, load, base_register, offset, src_dst_register);
+
+    if cpu.registers[15] != old_r15 + 4 && load {
+        cpu.flush = true;
+    } else {
+        cpu.registers[15] = old_r15;
+    }
 }
 
 fn halfword_data_transfer_handler(cpu: &mut Cpu, opcode: u32) {
@@ -230,6 +237,10 @@ fn halfword_data_transfer_handler(cpu: &mut Cpu, opcode: u32) {
     let src_dst_register = get_register_number_at!(opcode, 12);
 
     cpu.halfword_data_transfer(immediate, pre_indexing, add_offset, write_back, load, halfword_transfer_type, base_register, src_dst_register, offset_value, offset_register);
+    
+    if src_dst_register == 15 {
+        cpu.flush = true;
+    }
 }
 
 fn block_data_transfer_handler(cpu: &mut Cpu, opcode: u32) {

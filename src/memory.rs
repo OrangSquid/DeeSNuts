@@ -40,7 +40,7 @@ impl Memory {
             pallete_ram: vec![0; 0x400],
             vram: vec![0; 0x18000],
             oam: vec![0; 0x400],
-            rom: Vec::new(),
+            rom: Vec::new()
         }
     }
 
