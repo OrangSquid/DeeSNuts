@@ -88,7 +88,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8001384 {
+            if self.registers[15] == 0x8001540 {
                 println!("aiushdgasiydgh");
             }
             let temp_pipeline_1 = Some(self.fetch_arm());
@@ -351,11 +351,11 @@ impl Cpu {
             memory[address as usize] as u32
         } else {
             let mut value = memory.get_byte(address) as u32;
-            let mut address_rotate = address / 4 * 4 + (address + 1) % 4;
+            let mut address_rotate = (address & 0xFFFF_FFFC) + (address + 1) % 4;
             value |= (memory.get_byte(address_rotate) as u32) << 8;
-            address_rotate = address / 4 * 4 + (address + 2) % 4;
+            address_rotate = (address & 0xFFFF_FFFC) + (address + 2) % 4;
             value |= (memory.get_byte(address_rotate) as u32) << 16;
-            address_rotate = address / 4 * 4 + (address + 3) % 4;
+            address_rotate = (address & 0xFFFF_FFFC) + (address + 3) % 4;
             value |= (memory.get_byte(address_rotate) as u32) << 24;
             value
         };
@@ -365,7 +365,7 @@ impl Cpu {
     fn store_memory(&mut self, address: u32, src_register: usize, is_byte: bool) {
         let value_to_store = self.registers[src_register];
         if !is_byte {
-            self.memory.borrow_mut().store_word(address / 4 * 4, value_to_store);
+            self.memory.borrow_mut().store_word(address & 0xFFFF_FFFC, value_to_store);
         } else {
             self.memory.borrow_mut().store_byte(address, value_to_store as u8);
         }
@@ -411,12 +411,10 @@ impl Cpu {
             } else {
                 address -= offset;
             }
-        }
-
-        if write_back {
+        } 
+        if (write_back || !pre_indexing) && (!load || (load && src_dst_register != base_register)) {
             self.registers[base_register] = address;
         }
-        self.registers[15] -= 4;
     }
 
     fn load_halfword(
@@ -425,21 +423,43 @@ impl Cpu {
         dst_register: usize,
         halfword_transfer_type: HalfwordTransferType
     ) {
-        let value = self.memory.borrow().get_halfword(address);
-        match halfword_transfer_type {
-            HalfwordTransferType::UnsignedHalfwords => {
-                self.registers[dst_register] = value as u32;
+        if address > 0x1000_0000 {
+            match halfword_transfer_type {
+                HalfwordTransferType::UnsignedHalfwords => {
+                    self.registers[dst_register] = self.last_data_bus_read & 0xFFFF;
+                }
+                HalfwordTransferType::SignedByte => {
+                    self.registers[dst_register] = (self.last_data_bus_read & 0xFF) as i8 as i32 as u32;
+                }
+                HalfwordTransferType::SignedHalfwords => {
+                    self.registers[dst_register] = (self.last_data_bus_read & 0xFFFF) as i16 as i32 as u32;
+                }
+                HalfwordTransferType::NoOp =>
+                    panic!("Something went terribly wrong while loading a halfword"),
             }
-            HalfwordTransferType::SignedByte => {
-                self.registers[dst_register] = (value & 0xff) as i8 as i32 as u32;
+        } else {
+            let value = self.memory.borrow().get_halfword(address & !1);
+            match (halfword_transfer_type, check_bit!(address, 0)) {
+                (HalfwordTransferType::UnsignedHalfwords, false) => {
+                    self.registers[dst_register] = value as u32;
+                }
+                (HalfwordTransferType::UnsignedHalfwords, true) => {
+                    self.registers[dst_register] = (value as u32).rotate_right(8);
+                }
+                (HalfwordTransferType::SignedByte, _) => {
+                    self.registers[dst_register] = (value & 0xff) as i8 as i32 as u32;
+                }
+                (HalfwordTransferType::SignedHalfwords, false) => {
+                    self.registers[dst_register] = value as i16 as i32 as u32;
+                }
+                (HalfwordTransferType::SignedHalfwords, true) => {
+                    self.registers[dst_register] = (value as i16 as i32 >> 8) as u32;
+                }
+                (HalfwordTransferType::NoOp, _) =>
+                    panic!("Something went terribly wrong while loading a halfword"),
             }
-            HalfwordTransferType::SignedHalfwords => {
-                self.registers[dst_register] = value as i16 as i32 as u32;
-            }
-            HalfwordTransferType::NoOp =>
-                panic!("Something went terribly wrong while loading a halfword"),
+            self.last_data_bus_read = self.memory.borrow().get_word(address & 0xFFFF_FFFC);
         }
-        self.last_data_bus_read = value as u32;
     }
 
     fn store_halfword(
@@ -450,7 +470,7 @@ impl Cpu {
     ) {
         let value = self.registers[src_register] as u16;
         if halfword_transfer_type == HalfwordTransferType::UnsignedHalfwords {
-            self.memory.borrow_mut().store_halfword(address, value);
+            self.memory.borrow_mut().store_halfword(address / 2 * 2, value);
         } else {
             panic!("Something went terribly wrong while storing a halfword");
         }
@@ -548,8 +568,12 @@ impl Cpu {
 
     pub(super) fn single_data_swap(&mut self, transfer_byte: bool, address_register: usize, dst_register: usize, src_register: usize) {
         let address = self.registers[address_register];
+        let old_dst_register = self.registers[dst_register];
         self.load_memory(address, dst_register, transfer_byte);
+        let new_dst_register = self.registers[dst_register];
+        self.registers[dst_register] = old_dst_register;
         self.store_memory(address, src_register, transfer_byte);
+        self.registers[dst_register] = new_dst_register;
     }
 
     fn software_interrupt(&mut self) {
