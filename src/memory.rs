@@ -131,7 +131,13 @@ impl Index<Range<usize>> for Memory {
             PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &self.pallete_ram[min..=max],
             VRAM_ADDRESS..=VRAM_END => &self.vram[min..=max],
             OAM_ADRESS..=OAM_END => &self.oam[min..=max],
-            ROM_ADDRESS..=ROM_END => &self.rom[min..=max],
+            ROM_ADDRESS..=ROM_END => {
+                if max < self.rom.len() {
+                    &self.rom[min..=max]
+                } else {
+                    &self.rom[0..=max-min]
+                }
+            },
             SRAM_ADDRESS..=SRAM_END => todo!(),
             _ => panic!("Invalid memory address: {:#X}", index.start),
         }
@@ -150,7 +156,13 @@ impl IndexMut<Range<usize>> for Memory {
             PALLETE_RAM_ADDRESS..=PALLETE_RAM_END => &mut self.pallete_ram[min..=max],
             VRAM_ADDRESS..=VRAM_END => &mut self.vram[min..=max],
             OAM_ADRESS..=OAM_END => &mut self.oam[min..=max],
-            ROM_ADDRESS..=ROM_END => &mut self.rom[min..=max],
+            ROM_ADDRESS..=ROM_END => {
+                if max < self.rom.len() {
+                    &mut self.rom[min..=max]
+                } else {
+                    &mut self.rom[0..=max-min]
+                }
+            },
             SRAM_ADDRESS..=SRAM_END => todo!(),
             _ => panic!("Invalid memory address: {:#X}", index.start),
         }

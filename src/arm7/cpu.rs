@@ -88,7 +88,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8001540 {
+            if self.registers[15] == 0x8001b30 {
                 println!("aiushdgasiydgh");
             }
             let temp_pipeline_1 = Some(self.fetch_arm());
@@ -132,7 +132,9 @@ impl Cpu {
 
     fn fetch_thumb(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe) as u32
+        let instruction = self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe) as u32;
+        self.last_data_bus_read = instruction;
+        instruction
     }
 
     pub(super) fn pipeline_flush(&mut self) {
@@ -335,7 +337,8 @@ impl Cpu {
             } else {
                 address -= offset;
             }
-        } 
+        }
+
         if (write_back || !pre_indexing) && (!load || (load && src_dst_register != base_register)) {
             self.registers[base_register] = address;
         }
@@ -487,7 +490,8 @@ impl Cpu {
         mut register_mask: u32
     ) {
         let mut address = self.registers[base_register];
-        let number_registers = register_mask.count_ones();
+        self.registers[15] += 4;
+        let mut number_registers = register_mask.count_ones();
         let mut registers = Vec::with_capacity(number_registers as usize);
         let mut final_address = 0;
         for i in 0u8..16u8 {
@@ -497,13 +501,18 @@ impl Cpu {
             register_mask = register_mask >> 1;
         }
 
+        if number_registers == 0 {
+            number_registers = 16;
+            registers.push(15);
+        }
+
         if pre_indexing {
             if add_offset {
                 final_address += address + 4 * number_registers;
                 address += 4;
             } else {
                 final_address += address - 4 * number_registers;
-                address = final_address;
+                address = final_address;        
             }
         } else {
             if add_offset {
@@ -513,9 +522,14 @@ impl Cpu {
                 address = final_address + 4;
             }
         }
+
+        if write_back && registers.contains(&(base_register as u8)) && registers[0] != base_register as u8 && !load {
+            self.registers[base_register] = final_address;
+        }
+
         // Store old mode if S bit is set to transfer user mode registers
         let old_mode = self.cpsr_register & 0x1f;
-        if load_psr && (self.cpsr_register & USER_MODE) != USER_MODE {
+        if load_psr && old_mode != USER_MODE {
             self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | USER_MODE;
             self.switch_modes(old_mode);
         }
@@ -526,17 +540,13 @@ impl Cpu {
             self.store_multiple(address, &registers);
         }
 
-        if load_psr {
+        if load_psr && old_mode != USER_MODE {
             self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | old_mode;
             self.switch_modes(USER_MODE);
         }
 
-        if write_back {
-            if write_back {
-                self.registers[base_register] = final_address;
-            } else {
-                self.registers[base_register] = final_address;
-            }
+        if write_back && (!load || !registers.contains(&(base_register as u8))) {
+            self.registers[base_register] = final_address;
         }
     }
 
@@ -557,9 +567,6 @@ impl Cpu {
 
     fn store_multiple(&mut self, mut address: u32, registers: &[u8]) {
         for register in registers {
-            if *register == 15 {
-                self.flush = true;
-            }
             let value_to_store = self.registers[*register as usize];
             self.memory.borrow_mut().store_word(address, value_to_store);
             address += 4;

@@ -254,8 +254,15 @@ fn block_data_transfer_handler(cpu: &mut Cpu, opcode: u32) {
     let load = check_bit!(opcode, 20);
     let base_register = get_register_number_at!(opcode, 16);
     let register_mask = opcode & 0xffff;
+    let old_r15 = cpu.registers[15];
 
     cpu.block_data_transfer(pre_indexing, add_offset, load_psr, write_back, load, base_register, register_mask);
+
+    if cpu.registers[15] != old_r15 + 4 && load {
+        cpu.flush = true;
+    } else {
+        cpu.registers[15] = old_r15;
+    }
 }
 
 fn single_data_swap(cpu: &mut Cpu, opcode: u32) {
