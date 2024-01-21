@@ -1,79 +1,82 @@
 use std::{cell::RefCell, rc::Rc};
 
-use sdl2::{
-    render::{Canvas, TextureCreator},
-    surface::Surface,
-    video::{Window, WindowContext},
-};
-
+use crate::constants::*;
 use crate::memory::Memory;
+use crate::scheduler::{Event, EventType};
 
-const VISIBLE_V: u64 = 197120;
-const V_BLANK: u64 = 83776;
-const VISIBLE_H: u64 = 960;
-const H_BLANK: u64 = 272;
-const ACTUAL_VISIBLE_H: u64 = 1006;
-const DRAW_LINE: u64 = VISIBLE_H + H_BLANK;
+const DISPSTAT: u32 = 0x4000004;
+const VCOUNT: u32 = 0x4000006;
 
 pub struct Video {
-    window: Canvas<Window>,
-    texture_creator: TextureCreator<WindowContext>,
     memory: Rc<RefCell<Memory>>,
-    v_clock: u64,
-    h_clock: u64
+    pub frame_buffer: [u8; SCREEN_WIDTH * SCREEN_HEIGHT * 2]
 }
 
 impl Video {
-    pub fn new(window: Canvas<Window>, memory: Rc<RefCell<Memory>>) -> Self {
-        let texture_creator = window.texture_creator();
+    pub fn new(memory: Rc<RefCell<Memory>>) -> Self {
         Self {
-            window,
-            texture_creator,
             memory,
-            v_clock: 0,
-            h_clock: 0
+            frame_buffer: [0; SCREEN_WIDTH * SCREEN_HEIGHT * 2]
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn h_visible_end_handler(&mut self) -> Event {
         let mut memory = self.memory.borrow_mut();
-        let dispstat = memory.get_halfword(0x4000004);
-        self.h_clock += 1;
-        if self.h_clock == ACTUAL_VISIBLE_H {
-            memory.store_halfword(0x4000004, dispstat | 0x2);
-        } else if self.h_clock > DRAW_LINE {
-            memory.store_halfword(0x4000004, dispstat & !0x2);
-            self.h_clock = 0;
-        }
-        self.v_clock += 1;
-        if self.v_clock == DRAW_LINE * 160 {
-            memory.store_halfword(0x4000004, dispstat | 0x1);
-        } else if self.v_clock > DRAW_LINE * 226 {
-            memory.store_halfword(0x4000004, dispstat & !0x1);
-            drop(memory);
-            self.v_clock = 0;
-            self.display();
-        }
+        let dispstat = memory.get_halfword(DISPSTAT, false) | 0x2;
+        memory.store_halfword(DISPSTAT, dispstat, false);
+
+        Event::new(H_BLANK, EventType::HBlankEnd)
     }
 
-    pub fn display(&mut self) {
-        let video_mode = self.memory.borrow_mut().get_halfword(0x0400_0000) & 0x7;
+    pub fn h_blank_end_handler(&mut self) -> Event {
+        let mut memory = self.memory.borrow_mut();
+        let dispstat = memory.get_halfword(DISPSTAT, false) & !0x2;
+        let vcount = (memory.get_halfword(VCOUNT, false) + 1) % 228;
+        memory.store_halfword(DISPSTAT, dispstat, false);
+        memory.store_halfword(VCOUNT, vcount, false);
+        drop(memory);
+        if vcount < 160 {
+            self.render_line();
+        }
+
+        Event::new(VISIBLE_H, EventType::HVisibleEnd)
+    }
+
+    pub fn v_visible_end_handler(&mut self) -> Event {
+        let mut memory = self.memory.borrow_mut();
+        let dispstat = memory.get_halfword(DISPSTAT, false) | 0x1;
+        memory.store_halfword(DISPSTAT, dispstat, false);
+
+        Event::new(V_BLANK, EventType::VBlankEnd)
+    }
+
+    pub fn v_blank_end_handler(&mut self) -> Event {
+        let mut memory = self.memory.borrow_mut();
+        let dispstat = memory.get_halfword(DISPSTAT, false) & !0x1;
+        memory.store_halfword(DISPSTAT, dispstat, false);
+
+        Event::new(VISIBLE_V, EventType::VVisibleEnd)
+    }
+
+    pub fn render_line(&mut self) {
+        let video_mode = self.memory.borrow_mut().get_halfword(0x0400_0000, false) & 0x7;
         match video_mode {
             0x3 => self.video_mode_3(),
+            0x4 => self.video_mode_4(),
             _ => ()
         }
     }
 
     fn video_mode_3(&mut self) {
-        let memory_mut = &mut self.memory.borrow_mut()[0x0600_0000..0x0601_2C00];
-        let screen = Surface::from_data(
-            memory_mut,
-            240,
-            160,
-            480,
-            sdl2::pixels::PixelFormatEnum::BGR555,
-        ).unwrap();
-        self.window.copy(&self.texture_creator.create_texture_from_surface(screen).unwrap(), None, None).unwrap();
-        self.window.present();
-     }
+        let mut memory = self.memory.borrow_mut();
+        let line = memory.get_halfword(VCOUNT, false) as usize * SCREEN_WIDTH * 2;
+        if line > 76800 {
+            println!("aaaa");
+        }
+        self.frame_buffer[line..(line + SCREEN_WIDTH * 2)].copy_from_slice(&memory[(0x0600_0000 | line)..(0x600_0000 | (line + SCREEN_WIDTH * 2))]);
+    }
+
+    fn video_mode_4(&mut self) {
+        
+    }
 }

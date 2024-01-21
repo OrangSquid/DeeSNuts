@@ -18,7 +18,7 @@ struct PipelineStage2 {
 }
 
 pub struct Cpu {
-    memory: Rc<RefCell<Memory>>,
+    pub(super) memory: Rc<RefCell<Memory>>,
     pub(super) registers: [u32; 16],
     // Current Program Status Register
     pub(super) cpsr_register: u32,
@@ -68,7 +68,7 @@ impl Cpu {
     }
 
     pub fn next(&mut self) {
-        self.output_registers();
+        //self.output_registers();
         if (self.cpsr_register & STATE_BIT) == STATE_BIT {
             // THUMB MODE
             if self.pipeline_stage_2.is_some() {
@@ -125,14 +125,14 @@ impl Cpu {
 
     fn fetch_arm(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        let instruction = self.memory.borrow().get_word(self.registers[15] & 0xffff_fffc);
+        let instruction = self.memory.borrow_mut().get_word(self.registers[15] & 0xffff_fffc, true);
         self.last_data_bus_read = instruction;
         instruction
     }
 
     fn fetch_thumb(&mut self) -> u32 {
         //println!("Fetching at {:#08x}", self.registers[15]);
-        let instruction = self.memory.borrow().get_halfword(self.registers[15] & 0xffff_fffe) as u32;
+        let instruction = self.memory.borrow_mut().get_halfword(self.registers[15] & 0xffff_fffe, true) as u32;
         self.last_data_bus_read = instruction;
         instruction
     }
@@ -250,25 +250,53 @@ impl Cpu {
     }
 
     pub(super) fn multiply(&mut self, accumulate: bool, set_conditions: bool, operand_1_register: usize, operand_2_register: usize, operand_3_register: usize, destination_register: usize) {
+        let mut cycles_to_add = 0;
         let operand_1 = if accumulate {
+            cycles_to_add += 1;
             self.registers[operand_1_register]
         } else {
             0
         };
         let operand_2 = self.registers[operand_2_register];
+        if (operand_2 & 0xFFFF_FF00) == 0 || (operand_2 & 0xFFFF_FF00) == 0xFFFF_FF00 {
+            cycles_to_add += 1;
+        } else if (operand_2 & 0xFFFF_0000) == 0 || (operand_2 & 0xFFFF_0000) == 0xFFFF_0000 {
+            cycles_to_add += 2;
+        } else if (operand_2 & 0xFF00_0000) == 0 || (operand_2 & 0xFF00_0000) == 0xFF00_0000 {
+            cycles_to_add += 3;
+        } else {
+            cycles_to_add += 4;
+        }
         let operand_3 = self.registers[operand_3_register];
         let result = operand_3.wrapping_mul(operand_2).wrapping_add(operand_1);
         if set_conditions {
             self.set_multiply_flags(result);
         }
+        self.memory.borrow_mut().add_clock_cycles(cycles_to_add);
         self.registers[destination_register] = result;
     }
 
     pub(super) fn multiply_long(&mut self, signed: bool, accumulate: bool, set_conditions: bool, register_hi: usize, register_lo: usize, operand_1_register: usize, operand_2_register: usize) {
+        let mut cycles_to_add = 1;
         let operand_1 = self.registers[operand_1_register];
-        let operand_2 = self.registers[operand_2_register];
 
-        let operand_3 = if accumulate { ((self.registers[register_hi] as u64) << 32) | self.registers[register_lo] as u64 } else { 0 };
+        let operand_2 = self.registers[operand_2_register];
+        if (operand_2 & 0xFFFF_FF00) == 0 || ((operand_2 & 0xFFFF_FF00) == 0xFFFF_FF00 && signed) {
+            cycles_to_add += 1;
+        } else if (operand_2 & 0xFFFF_0000) == 0 || ((operand_2 & 0xFFFF_0000) == 0xFFFF_0000 && signed) {
+            cycles_to_add += 2;
+        } else if (operand_2 & 0xFF00_0000) == 0 || ((operand_2 & 0xFF00_0000) == 0xFF00_0000 && signed) {
+            cycles_to_add += 3;
+        } else {
+            cycles_to_add += 4;
+        }
+
+        let operand_3 = if accumulate {
+            cycles_to_add += 1;
+            ((self.registers[register_hi] as u64) << 32) | self.registers[register_lo] as u64 
+        } else { 
+            0 
+        };
 
         let result = if signed {
             (((operand_2 as i32) as i64) * ((operand_1 as i32) as i64)).wrapping_add(operand_3 as i64) as u64
@@ -281,6 +309,7 @@ impl Cpu {
         if set_conditions {
             self.set_long_multiply_flags(result);
         }
+        self.memory.borrow_mut().add_clock_cycles(cycles_to_add);
     }
 
     fn set_long_multiply_flags(&mut self, result: u64) {
@@ -349,28 +378,29 @@ impl Cpu {
             self.registers[dst_register] = self.last_data_bus_read;
             return;
         }
-        let memory = self.memory.borrow();
+        let mut memory = self.memory.borrow_mut();
         self.registers[dst_register] = if is_byte {
             memory[address as usize] as u32
         } else {
-            let mut value = memory.get_byte(address) as u32;
+            let mut value = memory.get_byte(address, true) as u32;
             let mut address_rotate = (address & 0xFFFF_FFFC) + (address + 1) % 4;
-            value |= (memory.get_byte(address_rotate) as u32) << 8;
+            value |= (memory.get_byte(address_rotate, false) as u32) << 8;
             address_rotate = (address & 0xFFFF_FFFC) + (address + 2) % 4;
-            value |= (memory.get_byte(address_rotate) as u32) << 16;
+            value |= (memory.get_byte(address_rotate, false) as u32) << 16;
             address_rotate = (address & 0xFFFF_FFFC) + (address + 3) % 4;
-            value |= (memory.get_byte(address_rotate) as u32) << 24;
+            value |= (memory.get_byte(address_rotate, false) as u32) << 24;
             value
         };
         self.last_data_bus_read = self.registers[dst_register];
+        self.memory.borrow_mut().add_clock_cycles(1);
     }
 
     fn store_memory(&mut self, address: u32, src_register: usize, is_byte: bool) {
         let value_to_store = self.registers[src_register];
         if !is_byte {
-            self.memory.borrow_mut().store_word(address & 0xFFFF_FFFC, value_to_store);
+            self.memory.borrow_mut().store_word(address & 0xFFFF_FFFC, value_to_store, true);
         } else {
-            self.memory.borrow_mut().store_byte(address, value_to_store as u8);
+            self.memory.borrow_mut().store_byte(address, value_to_store as u8, true);
         }
     }
 
@@ -441,7 +471,7 @@ impl Cpu {
                     panic!("Something went terribly wrong while loading a halfword"),
             }
         } else {
-            let value = self.memory.borrow().get_halfword(address & !1);
+            let value = self.memory.borrow_mut().get_halfword(address & !1, true);
             match (halfword_transfer_type, check_bit!(address, 0)) {
                 (HalfwordTransferType::UnsignedHalfwords, false) => {
                     self.registers[dst_register] = value as u32;
@@ -461,8 +491,9 @@ impl Cpu {
                 (HalfwordTransferType::NoOp, _) =>
                     panic!("Something went terribly wrong while loading a halfword"),
             }
-            self.last_data_bus_read = self.memory.borrow().get_word(address & 0xFFFF_FFFC);
+            self.last_data_bus_read = self.memory.borrow_mut().get_word(address & 0xFFFF_FFFC, false);
         }
+        self.memory.borrow_mut().add_clock_cycles(1);
     }
 
     fn store_halfword(
@@ -473,7 +504,7 @@ impl Cpu {
     ) {
         let value = self.registers[src_register] as u16;
         if halfword_transfer_type == HalfwordTransferType::UnsignedHalfwords {
-            self.memory.borrow_mut().store_halfword(address / 2 * 2, value);
+            self.memory.borrow_mut().store_halfword(address / 2 * 2, value, true);
         } else {
             panic!("Something went terribly wrong while storing a halfword");
         }
@@ -491,6 +522,7 @@ impl Cpu {
     ) {
         let mut address = self.registers[base_register];
         self.registers[15] += 4;
+        self.memory.borrow_mut().add_clock_cycles(1);
         let mut number_registers = register_mask.count_ones();
         let mut registers = Vec::with_capacity(number_registers as usize);
         let mut final_address = 0;
@@ -560,15 +592,16 @@ impl Cpu {
                     self.cpsr_register = (self.cpsr_register & 0xffff_ffe0) | USER_MODE;
                 }
             }
-            self.registers[*register as usize] = self.memory.borrow().get_word(address);
+            self.registers[*register as usize] = self.memory.borrow_mut().get_word(address, true);
             address += 4;
         }
+        self.memory.borrow_mut().add_clock_cycles(1);
     }
 
     fn store_multiple(&mut self, mut address: u32, registers: &[u8]) {
         for register in registers {
             let value_to_store = self.registers[*register as usize];
-            self.memory.borrow_mut().store_word(address, value_to_store);
+            self.memory.borrow_mut().store_word(address, value_to_store, true);
             address += 4;
         }
     }

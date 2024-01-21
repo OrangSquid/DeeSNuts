@@ -15,6 +15,7 @@ impl Cpu {
         match operand2_type {
             Operand2Type::RegisterWithRegisterShift => {
                 self.registers[15] += 4;
+                self.memory.borrow_mut().add_clock_cycles(1);
                 let operand = self.registers[get_register_number_at!(opcode, 0)];
                 let value = self.registers[get_register_number_at!(opcode, 8)] & 0xff;
                 self.barrel_shifter(value, operand, shift_type, true, set_condition_codes)
