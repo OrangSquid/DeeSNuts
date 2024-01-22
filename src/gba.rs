@@ -21,6 +21,7 @@ impl Gba {
         let memory = Rc::new(RefCell::new(Memory::new()));
         let mut scheduler = Scheduler::new(Rc::clone(&memory));
         scheduler.schedule_from_now(Event::new(VISIBLE_H, EventType::HVisibleEnd));
+        scheduler.schedule_from_now(Event::new(VISIBLE_V, EventType::VVisibleEnd));
         Gba {
             memory: Rc::clone(&memory),
             cpu: Cpu::new(Rc::clone(&memory)),

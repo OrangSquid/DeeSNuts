@@ -82,7 +82,7 @@ impl Video {
         let bg_memory_start = 0x600_0000 | ((memory.get_halfword(DISPCNT, false) as usize & 0x10) >> 4) * 0xA000 + line;
         let pallete = &memory[0x500_0000..0x500_01FF];
         for (vertical_line, entry) in memory[bg_memory_start..(bg_memory_start + SCREEN_WIDTH)].iter().enumerate() {
-            let color = pallete[*entry as usize];
+            let color = pallete[(*entry as usize) * 2] as u16 | ((pallete[(*entry as usize) * 2 + 1] as u16) << 8);
             self.frame_buffer[frame_buffer_line + vertical_line * 2] = color as u8;
             self.frame_buffer[frame_buffer_line + vertical_line * 2 + 1] = color as u8;
         }

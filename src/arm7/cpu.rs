@@ -68,7 +68,7 @@ impl Cpu {
     }
 
     pub fn next(&mut self) {
-        self.output_registers();
+        //self.output_registers();
         if (self.cpsr_register & STATE_BIT) == STATE_BIT {
             // THUMB MODE
             if self.pipeline_stage_2.is_some() {
@@ -88,7 +88,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8001b30 {
+            if self.registers[15] == 0x8001f38 {
                 println!("aiushdgasiydgh");
             }
             let temp_pipeline_1 = Some(self.fetch_arm());
