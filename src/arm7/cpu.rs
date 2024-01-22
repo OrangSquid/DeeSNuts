@@ -68,7 +68,7 @@ impl Cpu {
     }
 
     pub fn next(&mut self) {
-        //self.output_registers();
+        self.output_registers();
         if (self.cpsr_register & STATE_BIT) == STATE_BIT {
             // THUMB MODE
             if self.pipeline_stage_2.is_some() {
@@ -392,7 +392,7 @@ impl Cpu {
             value
         };
         self.last_data_bus_read = self.registers[dst_register];
-        self.memory.borrow_mut().add_clock_cycles(1);
+        memory.add_clock_cycles(1);
     }
 
     fn store_memory(&mut self, address: u32, src_register: usize, is_byte: bool) {
