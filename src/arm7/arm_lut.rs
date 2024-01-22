@@ -274,7 +274,9 @@ fn single_data_swap(cpu: &mut Cpu, opcode: u32) {
     cpu.single_data_swap(transfer_byte, address_register, dst_register, src_register);
 }
 
-fn software_interrupt_handler(cpu: &mut Cpu, opcode: u32) { }
+fn software_interrupt_handler(cpu: &mut Cpu, opcode: u32) { 
+    cpu.software_interrupt();
+}
 
 fn undefinied_handler(cpu: &mut Cpu, opcode: u32) { }
 

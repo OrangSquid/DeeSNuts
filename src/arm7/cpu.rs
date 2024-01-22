@@ -616,7 +616,11 @@ impl Cpu {
         self.registers[dst_register] = new_dst_register;
     }
 
-    fn software_interrupt(&mut self) {
-
+    pub(super) fn software_interrupt(&mut self) {
+        self.supervisor_banked[1] = self.registers[15] - 4;
+        self.saved_psr[2] = self.cpsr_register;
+        self.cpsr_register = SUPERVISOR_MODE;
+        self.registers[15] = 0x8;
+        self.flush = true;
     }
 }
