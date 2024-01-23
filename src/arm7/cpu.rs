@@ -8,7 +8,7 @@ use super::arm_lut::{
     arm_instruction_lut
 };
 
-const CONDITION_LUT: [bool; 256] = condition_lut();
+pub const CONDITION_LUT: [bool; 256] = condition_lut();
 const ARM_INSTRUCTION_LUT: [InstructionHandler; 4096] = arm_instruction_lut();
 const THUMB_INSTRUCTION_LUT: [InstructionHandler; 256] = thumb_instruction_lut();
 
@@ -71,6 +71,9 @@ impl Cpu {
         //self.output_registers();
         if (self.cpsr_register & STATE_BIT) == STATE_BIT {
             // THUMB MODE
+            if self.registers[15] == 0x000158 {
+                println!("aiushdgasiydgh");
+            }
             if self.pipeline_stage_2.is_some() {
                 let instruction = self.pipeline_stage_2.as_ref().unwrap();
                 (instruction.handler)(self, instruction.opcode);
@@ -88,7 +91,7 @@ impl Cpu {
             self.registers[15] += 2;
         } else {
             // ARM MODE
-            if self.registers[15] == 0x8001f38 {
+            if self.registers[15] == 0x000168 {
                 println!("aiushdgasiydgh");
             }
             let temp_pipeline_1 = Some(self.fetch_arm());
@@ -124,14 +127,14 @@ impl Cpu {
     }
 
     fn fetch_arm(&mut self) -> u32 {
-        //println!("Fetching at {:#08x}", self.registers[15]);
+        //println!("(ARM) Fetching at {:#08x}", self.registers[15]);
         let instruction = self.memory.borrow_mut().get_word(self.registers[15] & 0xffff_fffc, true);
         self.last_data_bus_read = instruction;
         instruction
     }
 
     fn fetch_thumb(&mut self) -> u32 {
-        //println!("Fetching at {:#08x}", self.registers[15]);
+        //println!("(THUMB) Fetching at {:#08x}", self.registers[15]);
         let instruction = self.memory.borrow_mut().get_halfword(self.registers[15] & 0xffff_fffe, true) as u32;
         self.last_data_bus_read = instruction;
         instruction
@@ -195,8 +198,8 @@ impl Cpu {
         self.flush = true;
     }
 
-    pub(super) fn branch(&mut self, link: bool, mut offset: i32) {
-        offset = (offset << 8) >> 6;
+    pub(super) fn branch(&mut self, link: bool, mut offset: i32, left_shift: u32, length: u32) {
+        offset = (offset << (32 - length)) >> (32 - length - left_shift);
         if link {
             self.registers[14] = self.registers[15] - 4;
         }
@@ -341,9 +344,13 @@ impl Cpu {
         load: bool,
         base_register: usize,
         offset: u32,
-        src_dst_register: usize
+        src_dst_register: usize,
+        force_word_alignment: bool
     ) {
         let mut address = self.registers[base_register];
+        if force_word_alignment {
+            address &= !0x3;
+        }
         self.registers[15] += 4;
 
         if pre_indexing {
@@ -618,8 +625,10 @@ impl Cpu {
 
     pub(super) fn software_interrupt(&mut self) {
         self.supervisor_banked[1] = self.registers[15] - 4;
+        let old_mode = self.cpsr_register & 0x1F;
         self.saved_psr[2] = self.cpsr_register;
         self.cpsr_register = SUPERVISOR_MODE;
+        self.switch_modes(old_mode);
         self.registers[15] = 0x8;
         self.flush = true;
     }

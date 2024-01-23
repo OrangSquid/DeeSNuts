@@ -29,7 +29,7 @@
             "program": "${workspaceFolder}\\target\\debug\\dees_nuts.exe",
             "args": [
                 "${workspaceFolder}\\bios\\BIOSGBA.ROM",
-                "${workspaceFolder}\\tests\\arm.gba"
+                "${workspaceFolder}\\tests\\thumb.gba"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}\\logs",

@@ -88,7 +88,7 @@ fn branch_handler(cpu: &mut Cpu, opcode: u32) {
     let link = check_bit!(opcode, 24);
     let offset = (opcode & 0xff_ffff) as i32;
 
-    cpu.branch(link, offset);
+    cpu.branch(link, offset, 2, 24);
 }
 
 fn branch_and_exchange_handler(cpu: &mut Cpu, opcode: u32) {
@@ -215,7 +215,7 @@ fn single_data_transfer(cpu: &mut Cpu, opcode: u32) {
     let src_dst_register = get_register_number_at!(opcode, 12);
     let old_r15 = cpu.registers[15];
 
-    cpu.single_data_transfer(pre_indexing, add_offset, transfer_byte, write_back, load, base_register, offset, src_dst_register);
+    cpu.single_data_transfer(pre_indexing, add_offset, transfer_byte, write_back, load, base_register, offset, src_dst_register, false);
 
     if cpu.registers[15] != old_r15 + 4 && load {
         cpu.flush = true;
