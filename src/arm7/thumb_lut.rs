@@ -1,6 +1,6 @@
 use crate::{check_bit, get_thumb_register_number_at};
 
-use super::cpu::{self, Cpu, CONDITION_LUT};
+use super::cpu::{Cpu, CONDITION_LUT};
 
 use super::constants::*;
 
@@ -84,11 +84,11 @@ fn add_subtract_handler(cpu: &mut Cpu, opcode: u32) {
         Operand2Type::RegisterWithImmediateShift
     };
     let alu_opcode = if check_bit!(opcode, 9) {
-        AluOpcode::Add
-    } else {
         AluOpcode::Subtract
+    } else {
+        AluOpcode::Add
     };
-    let operand_2 = cpu.get_operand2(operand_type, ShiftType::LogicalLeft, false, opcode & 0x7);
+    let operand_2 = cpu.get_operand2(operand_type, ShiftType::LogicalLeft, false, (opcode & 0x7) >> 6);
     let operand_1_register = get_thumb_register_number_at!(opcode, 3);
     let destination_register = get_thumb_register_number_at!(opcode, 0);
     
@@ -111,11 +111,11 @@ fn alu_immeddiate_handler(cpu: &mut Cpu, opcode: u32) {
 
 fn alu_operations_handler(cpu: &mut Cpu, opcode: u32) {
     let alu_opcode = to_alu_opcode((opcode & 0x3C0) >> 6);
-    let operand_1_register = get_thumb_register_number_at!(opcode, 3);
-    let operand_2_register = get_thumb_register_number_at!(opcode, 0);
+    let operand_1_register = get_thumb_register_number_at!(opcode, 0);
+    let operand_2_register = get_thumb_register_number_at!(opcode, 3);
     let operand_2 = cpu.get_operand2(Operand2Type::RegisterWithImmediateShift, ShiftType::LogicalLeft, false, operand_2_register as u32);
 
-    cpu.decode_alu(alu_opcode, true, operand_1_register, operand_2_register, operand_2);
+    cpu.decode_alu(alu_opcode, true, operand_1_register, operand_1_register, operand_2);
 }
 
 fn hi_register_operation_handler(cpu: &mut Cpu, opcode: u32) {
@@ -153,7 +153,7 @@ fn load_store_with_register_offset_handler(cpu: &mut Cpu, opcode: u32) {
     if halfword {
         let load = (opcode >> 10) & 0x3 != 0x0;
         let halfword_transfer_type = to_halfword_transfer_type((opcode >> 10) & 0x3);
-        cpu.halfword_data_transfer(false, true, true, false, load, halfword_transfer_type, base_register, src_dst_register, offset, offset as usize);
+        cpu.halfword_data_transfer(true, true, true, false, load, halfword_transfer_type, base_register, src_dst_register, offset, offset as usize);
     } else {
         let load = check_bit!(opcode, 11);
         let transfer_byte = check_bit!(opcode, 10);

@@ -34,7 +34,7 @@
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}\\logs",
             "environment": [],
-            "console": "externalTerminal"
+            "console": "integratedTerminal"
         }
     ],
     "compounds": []

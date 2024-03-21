@@ -68,10 +68,10 @@ impl Cpu {
     }
 
     pub fn next(&mut self) {
-        //self.output_registers();
+        self.output_registers();
         if (self.cpsr_register & STATE_BIT) == STATE_BIT {
             // THUMB MODE
-            if self.registers[15] == 0x000158 {
+            if self.registers[15] == 0x800018e {
                 println!("aiushdgasiydgh");
             }
             if self.pipeline_stage_2.is_some() {
@@ -442,7 +442,7 @@ impl Cpu {
         if load {
             self.load_halfword(address, src_dst_register, halfword_transfer_type);
         } else {
-            self.store_halfword(address, src_dst_register, halfword_transfer_type);
+            self.store_halfword(address, src_dst_register);
         }
 
         if !pre_indexing {
@@ -506,15 +506,10 @@ impl Cpu {
     fn store_halfword(
         &mut self,
         address: u32,
-        src_register: usize,
-        halfword_transfer_type: HalfwordTransferType
+        src_register: usize
     ) {
         let value = self.registers[src_register] as u16;
-        if halfword_transfer_type == HalfwordTransferType::UnsignedHalfwords {
-            self.memory.borrow_mut().store_halfword(address / 2 * 2, value, true);
-        } else {
-            panic!("Something went terribly wrong while storing a halfword");
-        }
+        self.memory.borrow_mut().store_halfword(address / 2 * 2, value, true);
     }
 
     pub(super) fn block_data_transfer(
